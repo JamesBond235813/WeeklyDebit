@@ -1,0 +1,1 @@
+ls |grep "\.sql" |grep -v merge_all  | xargs cat | grep -v -i "DROP" > ./merge_all.sql

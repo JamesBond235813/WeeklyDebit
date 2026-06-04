@@ -1,0 +1,10 @@
+.DS_Store
+*.log
+logs/
+node_modules/
+dist/
+target/
+.env.*.local
+
+# Sensitive runtime configuration
+bootstrap*.yml

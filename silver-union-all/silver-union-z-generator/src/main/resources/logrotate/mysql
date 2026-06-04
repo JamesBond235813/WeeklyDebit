@@ -1,0 +1,36 @@
+/data/mysql_data/logs/general.log
+/data/mysql_data/logs/error.log {
+            # 每周轮转
+            daily
+            # 保留30个历史备份
+            rotate 30
+            # 日志不存在时不报错
+            missingok
+            # 压缩旧日志（生成 .gz 文件）
+            compress
+            # 延迟一次压缩（保留最近一个未压缩）
+            delaycompress
+            # 空文件不轮转
+            notifempty
+            # 新日志文件权限和所有者
+            create 640 mysql mysql
+            # 所有日志轮转后执行一次脚本
+            sharedscripts
+            postrotate
+            # 向 MySQL 发送信号，强制重新打开日志文件
+               /bin/kill -SIGUSR1 $(cat /data/mysql_data/mysqld.pid 2>/dev/null) 2>/dev/null || true
+            endscript
+}
+/data/mysql_data/logs/slow-sql.log {
+                      weekly
+                      rotate 12
+                      compress
+                      delaycompress
+                      missingok
+                      notifempty
+                      create 640 mysql mysql
+                      postrotate
+                      # 轮转后触发MySQL刷新日志
+                         /usr/bin/mysqladmin flush-logs
+                      endscript
+}
