@@ -1,0 +1,28 @@
+.DS_Store
+Thumbs.db
+
+# Runtime logs and local run output
+logs/
+.codex-run-logs/
+*.log
+
+# Build output
+target/
+dist/
+coverage/
+.turbo/
+.vite/
+
+# Dependencies
+node_modules/
+
+# Nested repository metadata; this root repo tracks the source files directly.
+**/.git/
+**/.git.embedded-backup/
+
+# Local IDE/system files
+.idea/
+
+# Sensitive runtime configuration
+xiaohebao_06/silver-union-all/silver-union-ops/src/main/resources/bootstrap*.yml
+!xiaohebao_06/silver-union-all/silver-union-ops/src/main/resources/bootstrap.example.yml

@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>清除缓存 - 松鼠普惠</title>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            text-align: center;
+            max-width: 450px;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        .info {
+            color: #666;
+            margin-bottom: 30px;
+            line-height: 1.6;
+        }
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            font-size: 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        button:hover {
+            background: #5568d3;
+        }
+        .success {
+            display: none;
+            color: #4CAF50;
+            margin-top: 20px;
+            font-weight: bold;
+        }
+        .countdown {
+            color: #999;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔄 清除配置缓存</h1>
+        <div class="info">
+            系统配置已更新(新Logo和菜单设置),需要清除浏览器缓存才能生效。
+        </div>
+        <button onclick="clearCache()">立即清除缓存并刷新</button>
+        <div class="success" id="success">
+            ✅ 缓存已清除!
+            <div class="countdown" id="countdown"></div>
+        </div>
+    </div>
+
+    <script>
+        function clearCache() {
+            // 清除所有localStorage
+            localStorage.clear();
+            
+            // 清除sessionStorage
+            sessionStorage.clear();
+            
+            // 显示成功消息
+            document.getElementById('success').style.display = 'block';
+            
+            // 倒计时刷新
+            let count = 2;
+            const countdownEl = document.getElementById('countdown');
+            countdownEl.textContent = `页面将在 ${count} 秒后自动刷新...`;
+            
+            const timer = setInterval(() => {
+                count--;
+                if (count > 0) {
+                    countdownEl.textContent = `页面将在 ${count} 秒后自动刷新...`;
+                } else {
+                    clearInterval(timer);
+                    // 强制刷新页面,忽略缓存
+                    window.location.href = window.location.origin + '/?_t=' + Date.now();
+                }
+            }, 1000);
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="DP DataPlayer (data platform) icon">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#22C55E"/>
+      <stop offset="1" stop-color="#3B82F6"/>
+    </linearGradient>
+  </defs>
+
+  <!-- container -->
+  <rect x="28" y="28" width="200" height="200" rx="44" fill="#0B1220"/>
+  <rect x="28" y="28" width="200" height="200" rx="44" fill="none" stroke="#223047" stroke-width="2"/>
+
+  <!-- pipeline -->
+  <path d="M72 168 C 92 132, 112 136, 128 112 S 164 88, 184 104"
+        fill="none" stroke="url(#g)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- nodes -->
+  <circle cx="72" cy="168" r="9" fill="#22C55E"/>
+  <circle cx="128" cy="112" r="9" fill="#34D399"/>
+  <circle cx="184" cy="104" r="9" fill="#3B82F6"/>
+
+  <!-- operator blocks (data processing) -->
+  <rect x="106" y="142" width="28" height="28" rx="8" fill="none" stroke="url(#g)" stroke-width="8"/>
+  <rect x="146" y="128" width="20" height="20" rx="6" fill="#0B1220" stroke="#3B82F6" stroke-width="6"/>
+
+  <!-- DP monogram (subtle, platform-like) -->
+  <path d="M78 74 h34 a22 22 0 0 1 0 44 H78 Z" fill="none" stroke="#EAF2FF" stroke-width="10" stroke-linejoin="round" opacity="0.92"/>
+  <path d="M144 74 h22 a24 24 0 0 1 0 48 h-22 Z" fill="none" stroke="#EAF2FF" stroke-width="10" stroke-linejoin="round" opacity="0.92"/>
+</svg>

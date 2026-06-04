@@ -1,0 +1,1 @@
+scp -r /Users/liwei/shared/projects/jhl/silver-union-all/silver-union-ops/target/silver-union-ops.jar qingren@39.97.247.49:/data/service/rzdb/ops
