@@ -2,6 +2,7 @@ package com.jhl.silver.union.biz.user.service.impl;
 
 import com.github.pagehelper.PageInfo;
 import com.google.common.collect.Sets;
+import com.jhl.silver.union.biz.common.BizConstance;
 import com.jhl.silver.union.biz.common.ResultCode;
 import com.jhl.silver.union.biz.common.enums.UserAuthRoleEnum;
 import com.jhl.silver.union.biz.common.utils.BizHelper;
@@ -86,11 +87,16 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public PageInfo<UserInfoDTO> pageListUserInfo(PagedListUserInfoRequest request) {
+    public PageInfo<UserInfoDTO> pageListUserInfo(PagedListUserInfoRequest request, Long optUserId) {
         if (Objects.isNull(request)) {
             return PageInfoUtils.blankPageInfo();
         }
+        SuUserInfoDO optUser = this.getValidOperator(optUserId);
         UserQry userQry = UserQry.makeupFrom(request);
+        if (!this.isSuper(optUser)) {
+            userQry.setDepartmentId(optUser.getDepartmentId())
+                    .setExcludeSuper(true);
+        }
         PageInfo<SuUserInfoDO> innerPage = SuSqlUtils.pagedListQuery(request.getPage(), request.getPageSize(), true,
                 () -> userInfoManager.list(userQry.toQryWrapper(false)));
         PageInfo<UserInfoDTO> pageInfo = PageInfoUtils.copyPageInfoWithoutListFrom(innerPage);
@@ -131,6 +137,8 @@ public class UserServiceImpl implements UserService {
     public void addUserInfo(AddUserInfoRequest request, Long optUserId) {
         VerifyUtils.notNull(optUserId, "optUserId", "请指定操作人", true);
         request.validate();
+        SuUserInfoDO optUser = this.getValidOperator(optUserId);
+        this.checkAddUserAuth(optUser, request);
         SuUserInfoDO infoDO = convert.convert2SuUserInfoDO(request);
         // 密码散列后入库
         infoDO.setPassword(passwordEncoder.encode(infoDO.getPassword()));
@@ -157,11 +165,14 @@ public class UserServiceImpl implements UserService {
     public void updateUserInfo(UpdateUserInfoRequest request, Long optUserId) {
         VerifyUtils.notNull(optUserId, "optUserId", "请指定操作人", true);
         request.validate();
+        SuUserInfoDO optUser = this.getValidOperator(optUserId);
+        SuUserInfoDO existed = this.getExistingUserForManage(request.getId());
+        this.checkManageTargetAuth(optUser, existed);
+        this.checkUpdateUserAuth(optUser, request);
         SuUserInfoDO infoDO = convert.convert2SuUserInfoDO(request);
         infoDO.setCreateBy(optUserId);
         userInfoManager.updateById(infoDO);
         log.warn("操作人: {} 更新用户信息: {}", optUserId, GsonHelper.toJson(infoDO));
-        SuUserInfoDO existed = userInfoManager.getById(request.getId());
         if (Objects.nonNull(existed)) {
             userInfoManager.clearCacheBy(existed.getId(), existed.getUserName());
         }
@@ -178,6 +189,8 @@ public class UserServiceImpl implements UserService {
         if (Objects.isNull(existed)) {
             return;
         }
+        SuUserInfoDO optUser = this.getValidOperator(optUserId);
+        this.checkManageTargetAuth(optUser, existed);
         SuUserInfoDO upd = new SuUserInfoDO()
                 .setId(existed.getId())
                 .setDeleteFlag(System.currentTimeMillis());
@@ -191,10 +204,9 @@ public class UserServiceImpl implements UserService {
         VerifyUtils.notNull(optUserId, "optUserId", "请指定操作人", true);
         VerifyUtils.notNull(userId, "userId", "请指定重置密码的目标用户", true);
         String encodedPassword = passwordEncoder.encode(password);
-        SuUserInfoDO existed = userInfoManager.getById(userId);
-        if (Objects.isNull(existed)) {
-            return;
-        }
+        SuUserInfoDO optUser = this.getValidOperator(optUserId);
+        SuUserInfoDO existed = this.getExistingUserForManage(userId);
+        this.checkManageTargetAuth(optUser, existed);
         SuUserInfoDO upd = new SuUserInfoDO()
                 .setId(existed.getId())
                 .setPassword(encodedPassword);
@@ -202,6 +214,88 @@ public class UserServiceImpl implements UserService {
         log.warn("操作人: {} 重置用户{} - {}({}) 密码信息", optUserId, existed.getId(), existed.getRealName(),
                 existed.getUserName());
         userInfoManager.clearCacheBy(existed.getId(), existed.getUserName());
+    }
+
+    private SuUserInfoDO getValidOperator(Long optUserId) {
+        VerifyUtils.notNull(optUserId, "optUserId", "请指定操作人", true);
+        SuUserInfoDO optUser = userInfoManager.queryUserById(optUserId);
+        if (Objects.isNull(optUser)) {
+            throw new BizException(ResultCode.SYS_NO_AUTH, "optUserId: " + optUserId);
+        }
+        return optUser;
+    }
+
+    private SuUserInfoDO getExistingUserForManage(Long userId) {
+        SuUserInfoDO existed = userInfoManager.getById(userId);
+        if (Objects.isNull(existed) || !Objects.equals(existed.getDeleteFlag(), BizConstance.NOT_DELETED)) {
+            throw new BizException(ResultCode.USER_NOT_EXIST, "userId: " + userId);
+        }
+        return existed;
+    }
+
+    private void checkAddUserAuth(SuUserInfoDO optUser, AddUserInfoRequest request) {
+        if (this.isSuper(optUser)) {
+            return;
+        }
+        if (this.containsSuperRole(request.getRoles())) {
+            throw new BizException(ResultCode.SYS_NO_AUTH, "non-super user admin cannot grant super role");
+        }
+        Long optDeptId = OtherUtils.defaultIfNull(optUser.getDepartmentId(), BizConstance.NONE_DEPT_ID);
+        if (Objects.isNull(request.getDepartmentId())) {
+            request.setDepartmentId(optDeptId);
+            return;
+        }
+        if (!Objects.equals(request.getDepartmentId(), optDeptId)) {
+            throw new BizException(ResultCode.SYS_NO_AUTH, "target department id: " + request.getDepartmentId());
+        }
+    }
+
+    private void checkUpdateUserAuth(SuUserInfoDO optUser, UpdateUserInfoRequest request) {
+        if (this.isSuper(optUser)) {
+            return;
+        }
+        if (this.containsSuperRole(request.getRoles())) {
+            throw new BizException(ResultCode.SYS_NO_AUTH, "non-super user admin cannot grant super role");
+        }
+        Long optDeptId = OtherUtils.defaultIfNull(optUser.getDepartmentId(), BizConstance.NONE_DEPT_ID);
+        if (Objects.isNull(request.getDepartmentId())) {
+            request.setDepartmentId(optDeptId);
+            return;
+        }
+        if (!Objects.equals(request.getDepartmentId(), optDeptId)) {
+            throw new BizException(ResultCode.SYS_NO_AUTH, "target department id: " + request.getDepartmentId());
+        }
+    }
+
+    private void checkManageTargetAuth(SuUserInfoDO optUser, SuUserInfoDO targetUser) {
+        if (this.isSuper(optUser)) {
+            return;
+        }
+        if (this.isSuper(targetUser)) {
+            throw new BizException(ResultCode.SYS_NO_AUTH, "target user is super admin");
+        }
+        Long optDeptId = OtherUtils.defaultIfNull(optUser.getDepartmentId(), BizConstance.NONE_DEPT_ID);
+        Long targetDeptId = OtherUtils.defaultIfNull(targetUser.getDepartmentId(), BizConstance.NONE_DEPT_ID);
+        if (!Objects.equals(optDeptId, targetDeptId)) {
+            throw new BizException(ResultCode.SYS_NO_AUTH, "target user department id: " + targetDeptId);
+        }
+    }
+
+    private boolean isSuper(SuUserInfoDO user) {
+        if (Objects.isNull(user)) {
+            return false;
+        }
+        return StringUtils.contains(user.getRoles(), UserAuthRoleEnum.ROLE_SUPPER.name());
+    }
+
+    private boolean containsSuperRole(Collection<String> roles) {
+        if (CollectionUtils.isEmpty(roles)) {
+            return false;
+        }
+        return roles.stream()
+                .filter(Objects::nonNull)
+                .map(StringUtils::trim)
+                .anyMatch(UserAuthRoleEnum.ROLE_SUPPER.name()::equals);
     }
 
     @Override

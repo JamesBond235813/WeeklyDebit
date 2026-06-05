@@ -34,7 +34,7 @@ public interface UserService {
      * @param request
      * @return
      */
-    PageInfo<UserInfoDTO> pageListUserInfo(PagedListUserInfoRequest request);
+    PageInfo<UserInfoDTO> pageListUserInfo(PagedListUserInfoRequest request, Long optUserId);
 
     /**
      * 新增用户信息

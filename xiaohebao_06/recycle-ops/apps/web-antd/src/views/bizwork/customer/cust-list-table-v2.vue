@@ -106,7 +106,7 @@ const customerItemsRef = ref<PagedInfo<CustomerItem>>({
 });
 const pagination = ref<TablePaginationConfig>({});
 const custDescMap: Map<number, string> = new Map<number, string>();
-const custGroupDescList: string[] = [];
+const custGroupDescList = ref<string[]>([]);
 const visibleFieldKeys = ref<null | Set<string>>(null);
 const [VbenModal, modalApi] = useVbenModal({
   // 连接抽离的组件
@@ -141,11 +141,13 @@ async function initOptions() {
     const callResultTips = res.CALL_RESULT_TIPS || [];
     const dataChannel = res.DATA_CHANNEL || [];
 
-    custGroupDescList.splice(0, custGroupDescList.length);
+    const groupDescList: string[] = [];
     customerGroupOptions.value = customerStarGroup.map((e: BizDictItem) => {
-      custGroupDescList.push(`${e.label}: ${e.description || ''}`);
+      const description = e.description ? `${e.label}: ${e.description}` : e.label;
+      groupDescList.push(description);
       return { label: e.label, value: e.intValue };
     });
+    custGroupDescList.value = groupDescList;
     progressOptions.value = progressList.map((e: BizDictItem) => {
       return { label: e.label, value: e.intValue };
     });
@@ -1282,7 +1284,7 @@ function batchBackToOcean() {
             <template v-if="column.dataIndex === 'customerGroupDesc'">
               <div class="flex flex-shrink-0 items-center">
                 客户星级
-                <Tooltip>
+                <Tooltip v-if="custGroupDescList.length > 0">
                   <template #title>
                     <ul>
                       <template v-for="item in custGroupDescList" :key="item">

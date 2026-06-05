@@ -3,6 +3,7 @@ package com.jhl.silver.union.biz.data;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.jhl.silver.union.biz.common.BizConstance;
 import com.jhl.silver.union.biz.common.enums.CommonStatusEnum;
+import com.jhl.silver.union.biz.common.enums.UserAuthRoleEnum;
 import com.jhl.silver.union.biz.user.dal.entity.SuUserInfoDO;
 import com.jhl.silver.union.web.data.admin.PagedListUserInfoRequest;
 import lombok.Data;
@@ -78,6 +79,7 @@ public class UserQry {
      */
     private Long deleteFlag;
     private Integer onlineStatus;
+    private Boolean excludeSuper;
 
     public LambdaQueryWrapper<SuUserInfoDO> toQryWrapper(boolean forceValid) {
         LambdaQueryWrapper<SuUserInfoDO> qw = new LambdaQueryWrapper<>();
@@ -103,6 +105,8 @@ public class UserQry {
                 .in(!CollectionUtils.isEmpty(ids), SuUserInfoDO::getId, this.ids)
                 .in(!CollectionUtils.isEmpty(this.deptIds), SuUserInfoDO::getDepartmentId, this.deptIds)
                 .eq(Objects.nonNull(this.onlineStatus), SuUserInfoDO::getOnlineStatus, this.onlineStatus)
+                .notLike(Boolean.TRUE.equals(this.excludeSuper), SuUserInfoDO::getRoles,
+                        UserAuthRoleEnum.ROLE_SUPPER.name())
                 .likeRight(StringUtils.isNotBlank(this.realNamePrefix), SuUserInfoDO::getRealName, this.realNamePrefix)
         ;
         return qw;

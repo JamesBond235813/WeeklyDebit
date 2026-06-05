@@ -72,7 +72,7 @@ public class UserMngController {
     @Operation(summary = "分页查询用户信息列表")
     public SuResult<PageInfo<UserInfoDTO>> pagedListUserInfo(@RequestBody PagedListUserInfoRequest request) {
         request.autoFix();
-        PageInfo<UserInfoDTO> pageInfo = userService.pageListUserInfo(request);
+        PageInfo<UserInfoDTO> pageInfo = userService.pageListUserInfo(request, UserContext.getUserId());
         return SuResultUtils.successResult(pageInfo);
     }
 
