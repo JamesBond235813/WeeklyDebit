@@ -26,6 +26,7 @@ import java.util.Objects;
 import java.util.TreeMap;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -72,6 +73,7 @@ public class RecvThirdPlatDataController {
         CustPushRecordDO record = null;
         String decryptedData = null;
         Integer existedFlag = null;
+        String phoneMd5 = null;
         try {
             log.info("recv third plat access-check req: {}", GsonHelper.toJson(request));
             RequestContext context = prepareRequest("access-check", request, TYPE_ACCESS_CHECK, response);
@@ -88,7 +90,8 @@ public class RecvThirdPlatDataController {
             if (bizReq == null || StringUtils.isBlank(bizReq.getPhoneMd5())) {
                 return buildFailedResponse(response, ThirdPlatResultCode.INVALID_PARAMS, "phoneMd5不能为空", record);
             }
-            boolean existed = isMobileMd5Existed(bizReq.getPhoneMd5());
+            phoneMd5 = StringUtils.lowerCase(StringUtils.trim(bizReq.getPhoneMd5()));
+            boolean existed = isMobileMd5Existed(phoneMd5);
             RecvThirdPlatAccessCheckResult data = new RecvThirdPlatAccessCheckResult()
                     .setResult(existed ? ACCESS_DENIED : ACCESS_ALLOWED)
                     .setReason(existed ? "撞库失败，存在相同手机号" : null);
@@ -101,7 +104,7 @@ public class RecvThirdPlatDataController {
             return buildFailedResponse(response, ThirdPlatResultCode.SYSTEM_BUSY, null, record);
         } finally {
             if (record != null && record.getId() != null) {
-                custPushRecordService.updateRecord(record.getId(), null, null, null, decryptedData,
+                custPushRecordService.updateRecord(record.getId(), null, phoneMd5, null, decryptedData,
                         existedFlag, GsonHelper.toJson(response));
             }
             logResponse("access-check", response);
@@ -146,6 +149,15 @@ public class RecvThirdPlatDataController {
             custName = bizReq.getUserName();
             mobile = bizReq.getMobile();
             orderNo = bizReq.getOrderNo();
+            String mobileMd5 = DigestUtils.md5Hex(StringUtils.trim(mobile));
+            if (!custPushRecordService.existsPassedAccessCheck(request.getAppId(), mobileMd5)) {
+                return buildFailedResponse(response, ThirdPlatResultCode.INVALID_PARAMS,
+                        "该手机号未通过撞库或未先调用access-check", record);
+            }
+            if (isMobileExisted(mobile)) {
+                return buildFailedResponse(response, ThirdPlatResultCode.INVALID_PARAMS,
+                        "手机号已存在，请勿重复推送", record);
+            }
 
             PushCustInfoItem item = new PushCustInfoItem()
                     .setName(bizReq.getUserName())
@@ -219,6 +231,15 @@ public class RecvThirdPlatDataController {
     private boolean isMobileMd5Existed(String phoneMd5) {
         LambdaQueryWrapper<CustomerInfoItemDO> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(CustomerInfoItemDO::getMobileMd5, phoneMd5);
+        return customerInfoItemManager.count(wrapper) > 0;
+    }
+
+    private boolean isMobileExisted(String mobile) {
+        if (StringUtils.isBlank(mobile)) {
+            return false;
+        }
+        LambdaQueryWrapper<CustomerInfoItemDO> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(CustomerInfoItemDO::getMobile, StringUtils.trim(mobile));
         return customerInfoItemManager.count(wrapper) > 0;
     }
 

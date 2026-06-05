@@ -414,14 +414,15 @@ public class ImportCustDataServiceImpl implements ImportCustDataService {
         List<CustomerInfoItemDO> toInsertList = new ArrayList<>(list.size());
         Map<String, CustomerInfoItemDO> map = CollectionUtils.isEmpty(existedCustList)
                 ? Map.of()
-                : existedCustList.stream().collect(Collectors.toMap(e -> e.getName() + e.getMobile(), e -> e));
+                : existedCustList.stream().collect(Collectors.toMap(CustomerInfoItemDO::getMobile, e -> e,
+                        (first, ignored) -> first));
         List<ExistedCustInfoRowInfo> duplicatedList = new ArrayList<>(existedCustList.size());
         Iterator<CustomerInfoExcelRowInfo> itr = list.iterator();
 
         while (itr.hasNext()) {
             CustomerInfoExcelRowInfo rowInfo = itr.next();
             itr.remove();
-            CustomerInfoItemDO itemDO = map.get(rowInfo.getName() + rowInfo.getMobile());
+            CustomerInfoItemDO itemDO = map.get(rowInfo.getMobile());
             if (Objects.isNull(itemDO)) {
                 Long targetDeptId = info.getTargetDeptId();
                 Long targetUserId = info.getTargetUserId();

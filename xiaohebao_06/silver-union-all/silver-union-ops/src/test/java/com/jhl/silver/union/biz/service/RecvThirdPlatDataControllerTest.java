@@ -28,6 +28,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.apache.commons.codec.digest.DigestUtils;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -82,6 +83,8 @@ class RecvThirdPlatDataControllerTest {
         CryptoMaterial crypto = CryptoMaterial.generate();
         RecvThirdPlatDataConfig config = crypto.toConfig("APP_TEST");
         Mockito.when(sysConfigService.getRecvThirdPlatDataConfig("APP_TEST")).thenReturn(config);
+        Mockito.when(custPushRecordService.existsPassedAccessCheck("APP_TEST",
+                DigestUtils.md5Hex("13800000000"))).thenReturn(true);
 
         RecvThirdPlatApplyCreditRequest bizReq = new RecvThirdPlatApplyCreditRequest()
                 .setOrderNo("order-001")
@@ -102,6 +105,26 @@ class RecvThirdPlatDataControllerTest {
         Assertions.assertEquals("13800000000", item.getMobile());
         Assertions.assertEquals("110101199001011234", item.getIdCardNo());
         Assertions.assertEquals(config.getChannelName(), item.getChannelName());
+    }
+
+    @Test
+    void applyCreditRejectedWithoutAccessCheck() throws Exception {
+        CryptoMaterial crypto = CryptoMaterial.generate();
+        RecvThirdPlatDataConfig config = crypto.toConfig("APP_TEST");
+        Mockito.when(sysConfigService.getRecvThirdPlatDataConfig("APP_TEST")).thenReturn(config);
+
+        RecvThirdPlatApplyCreditRequest bizReq = new RecvThirdPlatApplyCreditRequest()
+                .setOrderNo("order-001")
+                .setUserName("张三")
+                .setIdNo("110101199001011234")
+                .setMobile("13800000000");
+        RecvThirdPlatCommonRequest request = crypto.buildCommonRequest("APP_TEST", bizReq);
+
+        RecvThirdPlatCommonResponse<Void> response = controller.applyCredit(request);
+        Assertions.assertEquals(400, response.getCode());
+        Assertions.assertEquals("该手机号未通过撞库或未先调用access-check", response.getMsg());
+        Mockito.verify(importCustDataService, Mockito.never()).addCustInfo(Mockito.any(), Mockito.anyLong(),
+                Mockito.anyLong());
     }
 
     @Test

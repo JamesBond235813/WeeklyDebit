@@ -67,6 +67,7 @@ public class HyyDataController {
         String decrypted = null;
         Integer existedFlag = null;
         String phoneCode = null;
+        String accessRequestId = null;
         try {
             decrypted = decrypt(request);
             HyyAccessCheckRequest bizReq = GsonHelper.fromJson(decrypted, HyyAccessCheckRequest.class);
@@ -87,6 +88,7 @@ public class HyyDataController {
                 return failed(CODE_DUPLICATED, "撞库失败，存在相同客户");
             }
             HyyAccessCheckResult result = buildAccessCheckResult(md5List);
+            accessRequestId = result.getRequestId();
             return success(result, "撞库通过，可以进件");
         } catch (IllegalArgumentException | BizException e) {
             log.warn("hyy access-check decrypt/parse failed", e);
@@ -96,7 +98,8 @@ public class HyyDataController {
             return failed(CODE_SYSTEM_BUSY, "系统繁忙，请稍后再试");
         } finally {
             if (record != null && record.getId() != null) {
-                custPushRecordService.updateRecord(record.getId(), null, phoneCode, null, decrypted, existedFlag, null);
+                custPushRecordService.updateRecord(record.getId(), null, phoneCode, accessRequestId, decrypted,
+                        existedFlag, null);
             }
         }
     }
@@ -112,28 +115,46 @@ public class HyyDataController {
         String custName = null;
         String mobile = null;
         String orderNo = null;
+        HyyCommonResponse<Void> response = null;
         try {
             decrypted = decrypt(request);
             HyyPushRequest bizReq = GsonHelper.fromJson(decrypted, HyyPushRequest.class);
             String errMsg = validatePush(bizReq);
             if (StringUtils.isNotBlank(errMsg)) {
-                return failed(CODE_INVALID_PARAMS, errMsg);
+                response = failed(CODE_INVALID_PARAMS, errMsg);
+                return response;
             }
             custName = bizReq.getName();
             mobile = bizReq.getPhone();
             orderNo = bizReq.getRequestId();
+            if (!custPushRecordService.existsPassedAccessCheckOrder(HYY_CHANNEL_NAME, orderNo)) {
+                response = failed(CODE_INVALID_PARAMS, "request_id未通过撞库或不存在");
+                return response;
+            }
+            if (custPushRecordService.existsPushedOrder(HYY_CHANNEL_NAME, orderNo)) {
+                response = failed(CODE_DUPLICATED, "request_id已推送，请勿重复提交");
+                return response;
+            }
+            if (isMobileExisted(mobile)) {
+                response = failed(CODE_DUPLICATED, "手机号已存在，请勿重复推送");
+                return response;
+            }
             PushCustInfoItem item = convertPushItem(bizReq);
             importCustDataService.addCustInfo(List.of(item), 0L, 0L);
-            return success(null, "success");
+            response = success(null, "success");
+            return response;
         } catch (IllegalArgumentException | BizException e) {
             log.warn("hyy push decrypt/parse failed", e);
-            return failed(CODE_DECRYPT_FAILED, "解密失败");
+            response = failed(CODE_DECRYPT_FAILED, "解密失败");
+            return response;
         } catch (Exception e) {
             log.error("hyy push failed", e);
-            return failed(CODE_SYSTEM_BUSY, "系统繁忙，请稍后再试");
+            response = failed(CODE_SYSTEM_BUSY, "系统繁忙，请稍后再试");
+            return response;
         } finally {
             if (record != null && record.getId() != null) {
-                custPushRecordService.updateRecord(record.getId(), custName, mobile, orderNo, decrypted, null, null);
+                custPushRecordService.updateRecord(record.getId(), custName, mobile, orderNo, decrypted, null,
+                        GsonHelper.toJson(response));
             }
         }
     }
@@ -192,6 +213,15 @@ public class HyyDataController {
         wrapper.likeRight(CustomerInfoItemDO::getMobile, phoneCode)
                 .last("limit 200");
         return customerInfoItemManager.list(wrapper);
+    }
+
+    private boolean isMobileExisted(String mobile) {
+        if (StringUtils.isBlank(mobile)) {
+            return false;
+        }
+        LambdaQueryWrapper<CustomerInfoItemDO> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(CustomerInfoItemDO::getMobile, StringUtils.trim(mobile));
+        return customerInfoItemManager.count(wrapper) > 0;
     }
 
     private boolean isDuplicatedCustomer(List<CustomerInfoItemDO> matches, String nameMd5, String idnoMd5) {

@@ -28,6 +28,33 @@ public interface CustPushRecordService {
     boolean existsThirdRequest(String appId, String requestId);
 
     /**
+     * 判断三方平台手机号是否已有通过撞库的记录
+     *
+     * @param appId 应用ID
+     * @param mobileMd5 手机号MD5
+     * @return true 表示存在已通过撞库记录
+     */
+    boolean existsPassedAccessCheck(String appId, String mobileMd5);
+
+    /**
+     * 判断指定渠道的业务请求ID是否已有通过撞库的记录
+     *
+     * @param channelName 渠道名称
+     * @param orderNo 业务请求ID
+     * @return true 表示存在已通过撞库记录
+     */
+    boolean existsPassedAccessCheckOrder(String channelName, String orderNo);
+
+    /**
+     * 判断指定渠道的业务请求ID是否已完成推送
+     *
+     * @param channelName 渠道名称
+     * @param orderNo 业务请求ID
+     * @return true 表示已推送
+     */
+    boolean existsPushedOrder(String channelName, String orderNo);
+
+    /**
      * 更新推送记录（一次性更新）
      *
      * @param recordId 记录ID
