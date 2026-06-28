@@ -23,6 +23,7 @@ public enum UserAuthRoleEnum {
     ROLE_DEPT_DATA_ADMIN("DEPT_DATA_ADMIN", "部门数据管理员", "管理本部门、下属部门以及对应部门人员的客户信息"),
     ROLE_USER_INFO_ADMIN("USER_INFO_ADMIN", "用户信息管理员", "拥有创建、编辑以及删除用户的权限"),
     ROLE_SALES("SALES", "普通业务员", "拥有我的客户、业务订单等基础作业权限"),
+    ROLE_OBSERVER("OBSERVER", "观察员", "只能查看公海客户和已有缓存风控报告"),
     ;
 
     UserAuthRoleEnum(String role, String dispName, String desc) {

@@ -12,6 +12,16 @@ import { defineStore } from 'pinia';
 import { getUserInfoApi, loginApi, logoutApi } from '#/api';
 import { $t } from '#/locales';
 
+const OBSERVER_HOME_PATH = '/biz-work/public-pool';
+const OBSERVER_ROLE = 'ROLE_OBSERVER';
+
+function normalizeHomePath(userInfo: UserInfo) {
+  const roles = userInfo.roles ?? [];
+  userInfo.homePath = roles.includes(OBSERVER_ROLE)
+    ? OBSERVER_HOME_PATH
+    : userInfo.homePath || DEFAULT_HOME_PATH;
+}
+
 export const useAuthStore = defineStore('auth', () => {
   const accessStore = useAccessStore();
   const userStore = useUserStore();
@@ -96,7 +106,7 @@ export const useAuthStore = defineStore('auth', () => {
   async function fetchUserInfo() {
     let userInfo: null | UserInfo = null;
     userInfo = await getUserInfoApi();
-    userInfo.homePath = userInfo.homePath || DEFAULT_HOME_PATH;
+    normalizeHomePath(userInfo);
     userStore.setUserInfo(userInfo);
     return userInfo;
   }

@@ -36,6 +36,14 @@ public enum BizDictConfigTypeEnum {
      * 芝麻分阈值
      */
     ZHIMA_SCORE_THRESHOLD("芝麻分阈值"),
+    /**
+     * 风险地区提醒
+     */
+    CUSTOMER_RISK_REGION("风险地区提醒"),
+    /**
+     * 黑名单地区提醒
+     */
+    CUSTOMER_BLACK_REGION("黑名单地区提醒"),
     ;
 
     BizDictConfigTypeEnum(String desc) {

@@ -27,4 +27,12 @@ public interface CustDispatchDailyStatMapper extends BaseMapper<CustDispatchDail
     int incrementManualCountBy(@Param("statDate") Date statDate,
                                @Param("userId") Long userId,
                                @Param("delta") Integer delta);
+
+    @Update("UPDATE cust_dispatch_daily_stat SET manual_count = manual_count + #{delta}, " +
+            "star_manual_count = star_manual_count + #{starDelta}, gmt_modified = NOW() " +
+            "WHERE stat_date = #{statDate} AND user_id = #{userId}")
+    int incrementManualAndStarCountBy(@Param("statDate") Date statDate,
+                                      @Param("userId") Long userId,
+                                      @Param("delta") Integer delta,
+                                      @Param("starDelta") Integer starDelta);
 }

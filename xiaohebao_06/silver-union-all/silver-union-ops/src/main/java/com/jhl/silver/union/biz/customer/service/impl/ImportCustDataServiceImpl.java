@@ -18,11 +18,13 @@ import com.jhl.silver.union.biz.customer.manager.CustomerInfoItemManager;
 import com.jhl.silver.union.biz.customer.service.BizConfigService;
 import com.jhl.silver.union.biz.customer.service.CustDispatchService;
 import com.jhl.silver.union.biz.customer.service.CustNoticeService;
+import com.jhl.silver.union.biz.customer.service.FeishuBotNotifyService;
 import com.jhl.silver.union.biz.customer.service.ImportCustDataService;
 import com.jhl.silver.union.biz.customer.service.MobileAreaService;
 import com.jhl.silver.union.biz.customer.service.excel.CustomerExcelReadListener;
 import com.jhl.silver.union.biz.data.CustImpRecQry;
 import com.jhl.silver.union.biz.data.CustomerInfoQry;
+import com.jhl.silver.union.biz.data.IdCardAreaInfo;
 import com.jhl.silver.union.biz.data.ImportCustCmd;
 import com.jhl.silver.union.biz.data.ImportFileProcInfo;
 import com.jhl.silver.union.biz.data.MobileAreaInfo;
@@ -30,6 +32,8 @@ import com.jhl.silver.union.biz.data.convert.CustImportRecordConvert;
 import com.jhl.silver.union.biz.data.excel.CustomerInfoExcelRowInfo;
 import com.jhl.silver.union.biz.data.excel.ExistedCustInfoRowInfo;
 import com.jhl.silver.union.biz.dept.service.DeptService;
+import com.jhl.silver.union.biz.region.service.IdCardAreaService;
+import com.jhl.silver.union.biz.risk.service.RiskDispatchAdmissionService;
 import com.jhl.silver.union.biz.user.service.UserService;
 import com.jhl.silver.union.commons.CommonConstant;
 import com.jhl.silver.union.commons.db.PageInfoUtils;
@@ -37,6 +41,7 @@ import com.jhl.silver.union.commons.db.SuSqlUtils;
 import com.jhl.silver.union.commons.exception.BizException;
 import com.jhl.silver.union.commons.exception.ExceptionLogPrinter;
 import com.jhl.silver.union.commons.gson.GsonHelper;
+import com.jhl.silver.union.commons.utils.IdCardUtils;
 import com.jhl.silver.union.commons.utils.OtherUtils;
 import com.jhl.silver.union.commons.utils.VerifyUtils;
 import com.jhl.silver.union.web.data.BizDictItem;
@@ -51,6 +56,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
@@ -86,6 +92,8 @@ public class ImportCustDataServiceImpl implements ImportCustDataService {
     @Resource
     private CustNoticeService custNoticeService;
     @Resource
+    private FeishuBotNotifyService feishuBotNotifyService;
+    @Resource
     private CustomerInfoItemManager customerInfoItemManager;
     @Resource
     private CustomerImportRecordManager customerImportRecordManager;
@@ -93,6 +101,12 @@ public class ImportCustDataServiceImpl implements ImportCustDataService {
     private CustImportRecordConvert customerConvert;
     @Resource
     private MobileAreaService mobileAreaService;
+    @Resource
+    private IdCardAreaService idCardAreaService;
+    @Resource
+    private RiskDispatchAdmissionService riskDispatchAdmissionService;
+    @Resource
+    private JdbcTemplate jdbcTemplate;
 
     @Override
     public String saveFile(MultipartFile file) {
@@ -221,6 +235,16 @@ public class ImportCustDataServiceImpl implements ImportCustDataService {
 
     @Override
     public void addCustInfo(List<PushCustInfoItem> itemList, Long targetDeptId, Long targetUserId) {
+        addCustInfoInternal(itemList, targetDeptId, targetUserId, false);
+    }
+
+    @Override
+    public void addApiPushedCustInfo(List<PushCustInfoItem> itemList, Long targetDeptId, Long targetUserId) {
+        addCustInfoInternal(itemList, targetDeptId, targetUserId, true);
+    }
+
+    private void addCustInfoInternal(List<PushCustInfoItem> itemList, Long targetDeptId, Long targetUserId,
+            boolean enableRiskAdmission) {
         if (CollectionUtils.isEmpty(itemList)) {
             return;
         }
@@ -252,8 +276,13 @@ public class ImportCustDataServiceImpl implements ImportCustDataService {
                 .setTargetUserId(targetUserId)
                 .setRowInfoList(rowList);
 
-        ImportCustResult result = this.importCustInfoWithResult(info, rowList, applyDate, true, true);
+        ImportCustResult result =
+                this.importCustInfoWithResult(info, rowList, applyDate, true, true, enableRiskAdmission);
         custNoticeService.notifyNewAssignment(result.getInsertedList(), result.getUpdatedList(), "API");
+        if (enableRiskAdmission) {
+            feishuBotNotifyService.notifyApiInsertedCustomers(result.getInsertedList());
+        }
+        markAssignedUsersOffline(result.getInsertedList());
     }
 
     @Override
@@ -385,6 +414,11 @@ public class ImportCustDataServiceImpl implements ImportCustDataService {
 
     private ImportCustResult importCustInfoWithResult(ImportFileProcInfo info, List<CustomerInfoExcelRowInfo> list,
             Date applyDate, boolean enableAutoDispatch, boolean collectNotice) {
+        return importCustInfoWithResult(info, list, applyDate, enableAutoDispatch, collectNotice, false);
+    }
+
+    private ImportCustResult importCustInfoWithResult(ImportFileProcInfo info, List<CustomerInfoExcelRowInfo> list,
+            Date applyDate, boolean enableAutoDispatch, boolean collectNotice, boolean enableRiskAdmission) {
         if (CollectionUtils.isEmpty(list)) {
             return ImportCustResult.empty();
         }
@@ -412,6 +446,7 @@ public class ImportCustDataServiceImpl implements ImportCustDataService {
                 .setMobiles(mobiles);
         List<CustomerInfoItemDO> existedCustList = customerInfoItemManager.list(qry.toQueryWrapper());
         List<CustomerInfoItemDO> toInsertList = new ArrayList<>(list.size());
+        Map<String, AdmissionStatMeta> admissionStatMetaMap = new HashMap<>();
         Map<String, CustomerInfoItemDO> map = CollectionUtils.isEmpty(existedCustList)
                 ? Map.of()
                 : existedCustList.stream().collect(Collectors.toMap(CustomerInfoItemDO::getMobile, e -> e,
@@ -432,7 +467,13 @@ public class ImportCustDataServiceImpl implements ImportCustDataService {
                 if (targetUserId == null) {
                     targetUserId = 0L;
                 }
-                if (autoActive) {
+                boolean riskAdmissionPassed = true;
+                boolean starPublicPool = false;
+                if (enableRiskAdmission && autoActive) {
+                    riskAdmissionPassed = riskDispatchAdmissionService.shouldAutoDispatch(rowInfo.getName(),
+                            rowInfo.getIdCardNo(), rowInfo.getMobile(), rowInfo.getUpstreamZhimaCode());
+                }
+                if (autoActive && riskAdmissionPassed) {
                     Optional<CustDispatchService.DispatchUserResult> autoResult =
                             custDispatchService.pickAutoAssignee(targetDeptId);
                     if (autoResult.isPresent()) {
@@ -440,17 +481,27 @@ public class ImportCustDataServiceImpl implements ImportCustDataService {
                         targetDeptId = autoResult.get().getDeptId();
                     } else {
                         targetUserId = 0L;
+                        starPublicPool = true;
                     }
                 } else if (targetUserId != null && targetUserId > 0L) {
                     manualAssignCounts.merge(targetUserId, 1, Integer::sum);
                 }
                 itemDO = makeupCustomerInfoItemDOFrom(rowInfo, targetDeptId, targetUserId, channelNameValueMap);
+                itemDO.setPublicPoolStarFlag(starPublicPool ? CommonConstant.YES : CommonConstant.NO);
                 itemDO.setApplyDate(applyDate)
                         .setSourceFileName(info.getOriFileName());
                 if (targetUserId != null && targetUserId > 0L) {
                     itemDO.setFollowTime(applyDate);
                 }
                 toInsertList.add(itemDO);
+                if (enableRiskAdmission) {
+                    admissionStatMetaMap.put(rowInfo.getMobile(), new AdmissionStatMeta()
+                            .setChannelName(rowInfo.getChannelName())
+                            .setUserSource(rowInfo.getUserSource())
+                            .setAdmissionPassed(riskAdmissionPassed)
+                            .setDispatchResult(resolveAdmissionDispatchResult(riskAdmissionPassed, starPublicPool,
+                                    targetUserId)));
+                }
             } else {
                 duplicatedList.add(ExistedCustInfoRowInfo.of(itemDO.getId(), rowInfo.getLineNo(), rowInfo.getName(),
                         rowInfo.getMobile(), rowInfo.getChannelName()));
@@ -464,6 +515,8 @@ public class ImportCustDataServiceImpl implements ImportCustDataService {
                 throw new BizException(ResultCode.IMPORT_CUST_FAILED,
                         "已存在相同的客户信息，可能其他人正在执行导入操作，请稍后重新导入。");
             }
+            recordStarPublicPoolEntries(toInsertList);
+            recordAdmissionStatEvents(toInsertList, admissionStatMetaMap, applyDate);
             info.addInsertedCnt(toInsertList.size());
             info.addProcessedCnt(toInsertList.size());
         }
@@ -499,6 +552,91 @@ public class ImportCustDataServiceImpl implements ImportCustDataService {
             }
         }
         return result;
+    }
+
+    private void recordStarPublicPoolEntries(List<CustomerInfoItemDO> insertedList) {
+        if (CollectionUtils.isEmpty(insertedList)) {
+            return;
+        }
+        long count = insertedList.stream()
+                .filter(item -> item != null && Objects.equals(item.getPublicPoolStarFlag(), CommonConstant.YES))
+                .count();
+        if (count <= 0) {
+            return;
+        }
+        jdbcTemplate.update("""
+                INSERT INTO cust_public_pool_star_daily_stat (stat_date, entry_count, gmt_create, gmt_modified)
+                VALUES (CURDATE(), ?, NOW(), NOW())
+                ON DUPLICATE KEY UPDATE entry_count = entry_count + VALUES(entry_count),
+                    gmt_modified = NOW()
+                """, (int) count);
+    }
+
+    private void recordAdmissionStatEvents(List<CustomerInfoItemDO> insertedList,
+            Map<String, AdmissionStatMeta> admissionStatMetaMap, Date applyDate) {
+        if (CollectionUtils.isEmpty(insertedList) || CollectionUtils.isEmpty(admissionStatMetaMap)) {
+            return;
+        }
+        Date statTime = applyDate == null ? new Date() : applyDate;
+        for (CustomerInfoItemDO item : insertedList) {
+            if (item == null || StringUtils.isBlank(item.getMobile())) {
+                continue;
+            }
+            AdmissionStatMeta meta = admissionStatMetaMap.get(item.getMobile());
+            if (meta == null) {
+                continue;
+            }
+            jdbcTemplate.update("""
+                    INSERT INTO cust_api_admission_stat_event
+                        (cust_id, mobile, channel_name, user_source, admission_passed, dispatch_result,
+                         stat_time, stat_date, stat_hour, gmt_create)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, DATE(?), HOUR(?), NOW())
+                    """,
+                    item.getId(),
+                    item.getMobile(),
+                    StringUtils.defaultIfBlank(meta.getChannelName(), "未知渠道"),
+                    StringUtils.defaultString(meta.getUserSource()),
+                    meta.isAdmissionPassed() ? 1 : 0,
+                    StringUtils.defaultString(meta.getDispatchResult()),
+                    statTime,
+                    statTime,
+                    statTime);
+        }
+    }
+
+    private String resolveAdmissionDispatchResult(boolean admissionPassed, boolean starPublicPool, Long targetUserId) {
+        if (!admissionPassed) {
+            return "PUBLIC_POOL";
+        }
+        if (starPublicPool) {
+            return "STAR_PUBLIC_POOL";
+        }
+        if (targetUserId != null && targetUserId > 0L) {
+            return "AUTO_ASSIGNED";
+        }
+        return "PUBLIC_POOL";
+    }
+
+    private void markAssignedUsersOffline(List<CustomerInfoItemDO> insertedList) {
+        if (CollectionUtils.isEmpty(insertedList)) {
+            return;
+        }
+        Set<Long> assignedUserIds = insertedList.stream()
+                .map(CustomerInfoItemDO::getOwnerUserId)
+                .filter(userId -> userId != null && userId > 0L)
+                .collect(Collectors.toSet());
+        if (CollectionUtils.isEmpty(assignedUserIds)) {
+            return;
+        }
+        assignedUserIds.forEach(userId -> {
+            try {
+                userService.updateOnlineStatus(userId, false);
+                log.info("marked assigned user offline after receiving new customer, userId={}", userId);
+            } catch (Exception e) {
+                log.warn("failed to mark assigned user offline after receiving new customer, userId={}, err={}",
+                        userId, e.getMessage());
+            }
+        });
     }
 
     private static class ImportCustResult {
@@ -538,6 +676,15 @@ public class ImportCustDataServiceImpl implements ImportCustDataService {
         }
     }
 
+    @lombok.Data
+    @lombok.experimental.Accessors(chain = true)
+    private static class AdmissionStatMeta {
+        private String channelName;
+        private String userSource;
+        private boolean admissionPassed;
+        private String dispatchResult;
+    }
+
     private CustomerInfoItemDO makeupCustomerInfoItemDOFrom(CustomerInfoExcelRowInfo rowInfo, Long targetDeptId,
             Long targetUserId, Map<String, Integer> channelNameValueMap) {
         CustomerInfoItemDO item = new CustomerInfoItemDO()
@@ -565,16 +712,57 @@ public class ImportCustDataServiceImpl implements ImportCustDataService {
                 .setCarNo(rowInfo.getCarNo())
                 .setCityId(rowInfo.getCityId())
                 .setCityName(rowInfo.getCityName())
+                .setUserSource(StringUtils.trimToEmpty(rowInfo.getUserSource()))
                 ;
         MobileAreaInfo areaInfo = mobileAreaService.getMobileArea(rowInfo.getMobile());
         if (areaInfo != null && StringUtils.isNotBlank(areaInfo.toDisplay())) {
             item.setMobileArea(areaInfo.toDisplay());
         }
+        applyIdCardInfo(item);
+        fillHukouAreaIfBlank(item);
         OtherUtils.processIfNotNull(rowInfo.getCarFlagEnum(),e->item.setCarFlag(e.flag));
         OtherUtils.processIfNotNull(rowInfo.getCarPurchaseTypeEnum(),e->item.setCarPurchaseType(e.purchaseType));
 
 
         return item;
+    }
+
+    private void applyIdCardInfo(CustomerInfoItemDO target) {
+        if (target == null || StringUtils.isBlank(target.getIdCardNo())) {
+            return;
+        }
+        IdCardUtils.IdCardInfo info = IdCardUtils.parse(target.getIdCardNo());
+        if (info == null) {
+            return;
+        }
+        target.setBirthday(info.getBirthday());
+        target.setSex(info.getSex());
+        target.setAge(info.getAge());
+    }
+
+    private void fillHukouAreaIfBlank(CustomerInfoItemDO target) {
+        if (target == null || StringUtils.isBlank(target.getIdCardNo())) {
+            return;
+        }
+        boolean needFill = StringUtils.isBlank(target.getHukouProvince())
+                || StringUtils.isBlank(target.getHukouCity())
+                || StringUtils.isBlank(target.getHukouDistrict());
+        if (!needFill) {
+            return;
+        }
+        IdCardAreaInfo info = idCardAreaService.getAreaInfoByIdCard(target.getIdCardNo());
+        if (info == null) {
+            return;
+        }
+        if (StringUtils.isBlank(target.getHukouProvince())) {
+            target.setHukouProvince(info.getProvince());
+        }
+        if (StringUtils.isBlank(target.getHukouCity())) {
+            target.setHukouCity(info.getCity());
+        }
+        if (StringUtils.isBlank(target.getHukouDistrict())) {
+            target.setHukouDistrict(info.getDistrict());
+        }
     }
 
     /**

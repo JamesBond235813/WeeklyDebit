@@ -11,6 +11,7 @@ const routes: RouteRecordRaw[] = [
         'ROLE_DEPT_INFO_ADMIN',
         'ROLE_DEPT_DATA_ADMIN',
         'ROLE_USER_INFO_ADMIN',
+        'ROLE_SALES',
       ],
     },
     name: 'Management',
@@ -58,7 +59,22 @@ const routes: RouteRecordRaw[] = [
         meta: {
           icon: 'carbon:customer',
           title: '客户信息管理',
-          hideInMenu: true,
+          authority: [
+            'ROLE_SUPPER',
+            'ROLE_DEPT_INFO_ADMIN',
+            'ROLE_DEPT_DATA_ADMIN',
+            'ROLE_USER_INFO_ADMIN',
+            'ROLE_SALES',
+          ],
+        },
+      },
+      {
+        name: 'RiskRegion',
+        path: '/management/risk-region',
+        component: () => import('#/views/management/riskRegion/index.vue'),
+        meta: {
+          icon: 'lucide:map-pinned',
+          title: '风险地区提醒',
           authority: ['ROLE_SUPPER'],
         },
       },

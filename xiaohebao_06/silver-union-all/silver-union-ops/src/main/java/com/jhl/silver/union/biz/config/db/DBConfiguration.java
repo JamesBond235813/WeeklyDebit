@@ -5,7 +5,9 @@
 package com.jhl.silver.union.biz.config.db;
 
 import com.baomidou.mybatisplus.extension.plugins.MybatisPlusInterceptor;
+import com.baomidou.mybatisplus.extension.plugins.inner.PaginationInnerInterceptor;
 import com.baomidou.mybatisplus.extension.plugins.inner.OptimisticLockerInnerInterceptor;
+import com.baomidou.mybatisplus.annotation.DbType;
 import com.github.pagehelper.PageInterceptor;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.context.annotation.Bean;
@@ -30,6 +32,8 @@ public class DBConfiguration {
         MybatisPlusInterceptor interceptor = new MybatisPlusInterceptor();
         // 添加乐观锁插件
         interceptor.addInnerInterceptor(new OptimisticLockerInnerInterceptor());
+        // 添加分页插件，保证 MyBatis-Plus Page 查询生成 limit/total SQL。
+        interceptor.addInnerInterceptor(new PaginationInnerInterceptor(DbType.MYSQL));
         return interceptor;
     }
 }

@@ -84,6 +84,9 @@ export interface UserInfoRowItem {
   /** 用户状态。 1：正常。 0：禁用 */
   status: number;
 
+  /** 在线状态。 1：在线。 0：离线 */
+  onlineStatus?: number;
+
   /** 用户名,即用户登录账号，不可重复 */
   userName: string;
 }
@@ -206,6 +209,10 @@ export const userApi = {
    */
   revokeByUid: (id: number) => {
     return requestClient.get(`/sys/user/revoke-by-uid?userId=${id}`);
+  },
+
+  countManageableOnlineUsers: async () => {
+    return requestClient.get<number>('/sys/user/online-count');
   },
 
   listTeamUser: async (onlineOnly?: number) => {

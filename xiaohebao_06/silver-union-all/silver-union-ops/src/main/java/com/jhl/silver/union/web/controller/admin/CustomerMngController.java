@@ -68,7 +68,8 @@ public class CustomerMngController {
     @Operation(summary = "新增客户信息")
     @PostMapping("/add-cust")
     public SuResult<Void> addCustomerInfo(@RequestBody AddCustomerInfoRequest request) {
-        customerInfoService.addCustomerFactInfo(request, UserContext.getUserId());
+        customerInfoService.addCustomerFactInfo(request, UserContext.getUserId(), UserContext.getDeptId(),
+                UserContext.getRoles());
         return SuResultUtils.successResult();
     }
 

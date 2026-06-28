@@ -34,7 +34,9 @@ const [PwdModal, pwdModalApi] = useVbenModal({
 const notifications = ref<NotificationItem[]>([]);
 const noticeItems = ref<CustomerNoticeItem[]>([]);
 const noticeWs = ref<WebSocket | null>(null);
+const noticePollTimer = ref<number | null>(null);
 const noticeWsTimer = ref<number | null>(null);
+const onlineCountTimer = ref<number | null>(null);
 const showAllUnreadModal = ref(false);
 const allUnreadLoading = ref(false);
 
@@ -77,8 +79,13 @@ async function handleMakeAll() {
 
 async function loadCustomerNotices() {
   try {
+    const oldIds = new Set(noticeItems.value.map((item) => item.id));
     const list = await customerApi.getCustomerNoticeUnread(20);
-    noticeItems.value = Array.isArray(list) ? list : [];
+    const nextItems = Array.isArray(list) ? list : [];
+    nextItems
+      .filter((item) => item?.id && !oldIds.has(item.id))
+      .forEach((item) => syncOfflineStatusWhenAssigned(item));
+    noticeItems.value = nextItems;
     syncNotifications();
   } catch (error) {
     // ignore notice errors
@@ -119,8 +126,10 @@ function buildWsUrl() {
   if (!token) {
     return null;
   }
-  const base = apiURL.replace(/^http/, 'ws').replace(/\/$/, '');
-  return `${base}/ws/notice?token=${token}`;
+  const baseUrl = new URL(apiURL || '/api', window.location.origin);
+  baseUrl.protocol = baseUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+  const base = baseUrl.toString().replace(/\/$/, '');
+  return `${base}/ws/notice?token=${encodeURIComponent(token)}`;
 }
 
 function parseJwtPayload(token: string) {
@@ -161,7 +170,13 @@ function startNoticeWs() {
     noticeWs.value.close();
     noticeWs.value = null;
   }
-  const ws = new WebSocket(wsUrl);
+  let ws: WebSocket;
+  try {
+    ws = new WebSocket(wsUrl);
+  } catch (e) {
+    scheduleNoticeWsReconnect();
+    return;
+  }
   noticeWs.value = ws;
   ws.onopen = () => {
     if (noticeWsTimer.value) {
@@ -180,18 +195,54 @@ function startNoticeWs() {
       // ignore parsing errors
     }
   };
-  ws.onclose = () => {
-    if (noticeWsTimer.value) {
-      window.clearTimeout(noticeWsTimer.value);
-    }
-    if (!canStartNoticeWs()) {
-      noticeWsTimer.value = null;
-      return;
-    }
-    noticeWsTimer.value = window.setTimeout(() => {
-      startNoticeWs();
-    }, 3000);
+  ws.onerror = () => {
+    ws.close();
   };
+  ws.onclose = () => scheduleNoticeWsReconnect();
+}
+
+function scheduleNoticeWsReconnect() {
+  if (noticeWsTimer.value) {
+    window.clearTimeout(noticeWsTimer.value);
+  }
+  if (!canStartNoticeWs()) {
+    noticeWsTimer.value = null;
+    return;
+  }
+  noticeWsTimer.value = window.setTimeout(() => {
+    startNoticeWs();
+  }, 3000);
+}
+
+function startNoticePolling() {
+  if (noticePollTimer.value) {
+    window.clearInterval(noticePollTimer.value);
+    noticePollTimer.value = null;
+  }
+  if (!canStartNoticeWs()) {
+    return;
+  }
+  noticePollTimer.value = window.setInterval(() => {
+    loadCustomerNotices();
+  }, 5000);
+}
+
+function stopNoticeRealtime() {
+  if (noticePollTimer.value) {
+    window.clearInterval(noticePollTimer.value);
+    noticePollTimer.value = null;
+  }
+  if (noticeWsTimer.value) {
+    window.clearTimeout(noticeWsTimer.value);
+    noticeWsTimer.value = null;
+  }
+  if (noticeWs.value) {
+    const ws = noticeWs.value;
+    ws.onclose = null;
+    ws.onerror = null;
+    ws.close();
+    noticeWs.value = null;
+  }
 }
 
 function addNotice(item: CustomerNoticeItem) {
@@ -201,8 +252,97 @@ function addNotice(item: CustomerNoticeItem) {
   if (noticeItems.value.some((n) => n.id === item.id)) {
     return;
   }
+  syncOfflineStatusWhenAssigned(item);
   noticeItems.value.unshift(item);
   syncNotifications();
+}
+
+function syncOfflineStatusWhenAssigned(item: CustomerNoticeItem) {
+  const userInfo = userStore.userInfo;
+  if (!userInfo) {
+    return;
+  }
+  const currentUserId = Number(userInfo?.userId);
+  if (!currentUserId || item.ownerUserId !== currentUserId) {
+    return;
+  }
+  if (userInfo?.onlineStatus === 0) {
+    return;
+  }
+  userStore.setUserInfo({
+    ...userInfo,
+    onlineStatus: 0,
+  });
+  refreshOnlineUserCount();
+  message.warning({
+    content: '已收到新客户，系统已自动切换为离线',
+  });
+}
+
+function hasUserManagementMenu() {
+  const findMenu = (menus: any[]): boolean => {
+    return menus.some((menu) => {
+      if (menu.path === '/userManagement' || menu.name === '用户管理') {
+        return true;
+      }
+      return Array.isArray(menu.children) ? findMenu(menu.children) : false;
+    });
+  };
+  return findMenu(accessStore.accessMenus || []);
+}
+
+function updateUserManagementBadge(count: number | null) {
+  const patchMenus = (menus: any[]): any[] => {
+    return menus.map((menu) => {
+      const next = {
+        ...menu,
+        children: Array.isArray(menu.children)
+          ? patchMenus(menu.children)
+          : menu.children,
+      };
+      if (next.path === '/userManagement' || next.name === '用户管理') {
+        if (count === null) {
+          delete next.badge;
+          delete next.badgeType;
+          delete next.badgeVariants;
+        } else {
+          next.badge = String(count);
+          next.badgeType = 'normal';
+          next.badgeVariants = 'outline-success';
+        }
+      }
+      return next;
+    });
+  };
+  accessStore.setAccessMenus(patchMenus(accessStore.accessMenus || []));
+}
+
+async function refreshOnlineUserCount() {
+  if (!hasUserManagementMenu()) {
+    updateUserManagementBadge(null);
+    return;
+  }
+  try {
+    const count = await userApi.countManageableOnlineUsers();
+    updateUserManagementBadge(Number(count || 0));
+  } catch (e) {
+    // ignore online count errors
+  }
+}
+
+function startOnlineCountPolling() {
+  if (onlineCountTimer.value) {
+    window.clearInterval(onlineCountTimer.value);
+    onlineCountTimer.value = null;
+  }
+  if (!accessStore.accessToken) {
+    updateUserManagementBadge(null);
+    return;
+  }
+  refreshOnlineUserCount();
+  onlineCountTimer.value = window.setInterval(() => {
+    refreshOnlineUserCount();
+  }, 10_000);
 }
 
 async function markAllRead() {
@@ -311,6 +451,8 @@ watch(
     if (userId) {
       loadCustomerNotices();
       startNoticeWs();
+      startNoticePolling();
+      startOnlineCountPolling();
     }
   },
   { immediate: true },
@@ -322,29 +464,38 @@ watch(
   (token) => {
     if (token && canStartNoticeWs()) {
       startNoticeWs();
+      startNoticePolling();
+      startOnlineCountPolling();
     } else {
-      if (noticeWsTimer.value) {
-        window.clearTimeout(noticeWsTimer.value);
-        noticeWsTimer.value = null;
+      if (onlineCountTimer.value) {
+        window.clearInterval(onlineCountTimer.value);
+        onlineCountTimer.value = null;
       }
-      if (!noticeWs.value) {
-        return;
-      }
-      noticeWs.value.close();
-      noticeWs.value = null;
+      updateUserManagementBadge(null);
+      stopNoticeRealtime();
     }
   },
 );
 
 onMounted(() => {
   window.addEventListener(noticeReadEventName, handleNoticeReadEvent);
+  startNoticePolling();
+  startOnlineCountPolling();
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener(noticeReadEventName, handleNoticeReadEvent);
+  stopNoticeRealtime();
+  if (onlineCountTimer.value) {
+    window.clearInterval(onlineCountTimer.value);
+    onlineCountTimer.value = null;
+  }
 });
 
-function updateOnlineStatusChange(checked: boolean) {
+function updateOnlineStatusChange(checked?: boolean) {
+  if (typeof checked !== 'boolean' || !userStore.userInfo) {
+    return;
+  }
   if (checked === (userStore.userInfo.onlineStatus === 1)) {
     return;
   }
@@ -356,6 +507,7 @@ function updateOnlineStatusChange(checked: boolean) {
       authStore
         .fetchUserInfo()
         .then(() => {
+          refreshOnlineUserCount();
           message.success({
             content: checked ? '上线成功' : '下线成功',
           });
@@ -584,6 +736,20 @@ function updateOnlineStatusChange(checked: boolean) {
   color: #6b7280;
   text-align: center;
   padding: 20px 0;
+}
+
+:global([data-badge-variant='outline-success']) {
+  min-width: 18px !important;
+  height: 18px !important;
+  padding: 0 5px !important;
+  color: #16a34a !important;
+  background: #f0fdf4 !important;
+  border: 1.5px solid #22c55e !important;
+  border-radius: 999px !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  line-height: 16px !important;
+  box-shadow: none !important;
 }
 
 @keyframes noticeGlow {

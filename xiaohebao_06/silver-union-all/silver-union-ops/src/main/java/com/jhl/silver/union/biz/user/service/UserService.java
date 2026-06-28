@@ -37,6 +37,14 @@ public interface UserService {
     PageInfo<UserInfoDTO> pageListUserInfo(PagedListUserInfoRequest request, Long optUserId);
 
     /**
+     * 统计当前操作人可管理范围内的在线用户数
+     *
+     * @param optUserId 操作人用户 ID
+     * @return 在线用户数
+     */
+    long countManageableOnlineUsers(Long optUserId);
+
+    /**
      * 新增用户信息
      *
      * @param request

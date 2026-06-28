@@ -6,7 +6,12 @@ const routes: RouteRecordRaw[] = [
       icon: 'lucide:keyboard',
       order: -2,
       title: '工作台',
-      authority: ['ROLE_SUPPER', 'ROLE_DEPT_DATA_ADMIN', 'ROLE_SALES'],
+      authority: [
+        'ROLE_SUPPER',
+        'ROLE_DEPT_DATA_ADMIN',
+        'ROLE_SALES',
+        'ROLE_OBSERVER',
+      ],
     },
     name: 'BizWork',
     path: '/biz-work',
@@ -30,6 +35,12 @@ const routes: RouteRecordRaw[] = [
           icon: 'carbon:customer-service',
           keepAlive: false,
           title: '公海客户',
+          authority: [
+            'ROLE_SUPPER',
+            'ROLE_DEPT_DATA_ADMIN',
+            'ROLE_SALES',
+            'ROLE_OBSERVER',
+          ],
         },
       },
       {
@@ -40,6 +51,7 @@ const routes: RouteRecordRaw[] = [
           icon: 'carbon:customer-service',
           keepAlive: false,
           title: '我的客户',
+          authority: ['ROLE_SUPPER', 'ROLE_DEPT_DATA_ADMIN', 'ROLE_SALES'],
           // query: { favoriteOnly: true, title: '我的客户' },
         },
       },
@@ -51,6 +63,7 @@ const routes: RouteRecordRaw[] = [
           icon: 'carbon:customer-service',
           title: '再分配客户',
           hideInMenu: true,
+          authority: ['ROLE_SUPPER', 'ROLE_DEPT_DATA_ADMIN', 'ROLE_SALES'],
           // query: { favoriteOnly: true, title: '我的客户' },
         },
       },
@@ -63,6 +76,7 @@ const routes: RouteRecordRaw[] = [
           keepAlive: false,
           title: '重点客户',
           hideInMenu: true,
+          authority: ['ROLE_SUPPER', 'ROLE_DEPT_DATA_ADMIN', 'ROLE_SALES'],
         },
       },
       {
@@ -72,6 +86,7 @@ const routes: RouteRecordRaw[] = [
         meta: {
           icon: 'lucide:receipt',
           title: '放款记录',
+          authority: ['ROLE_SUPPER', 'ROLE_DEPT_DATA_ADMIN', 'ROLE_SALES'],
         },
       },
       {
@@ -82,6 +97,7 @@ const routes: RouteRecordRaw[] = [
           icon: 'lucide:shopping-cart',
           title: '业务订单',
           hideInMenu: true,
+          authority: ['ROLE_SUPPER', 'ROLE_DEPT_DATA_ADMIN', 'ROLE_SALES'],
         },
       },
     ],

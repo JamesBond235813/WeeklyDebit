@@ -7,7 +7,7 @@ fi
 base_dir=`pwd`
 log_dir=${base_dir}/logs
 app_name=silver-union-ops
-profile="prod-mini"
+profile="local"
 
 
 PID=`ps -ef | grep ${app_name}.jar |grep "active=${profile}" | grep -v grep | awk '{print $2}'`;

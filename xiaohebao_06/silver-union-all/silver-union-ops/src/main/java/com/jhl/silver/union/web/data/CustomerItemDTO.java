@@ -159,6 +159,36 @@ public class CustomerItemDTO {
      */
     @Schema(description = "房产价值，单位万元")
     private Integer houseVal;
+
+    @Schema(description = "HYY房产语义")
+    private String hyyHouseDesc;
+
+    @Schema(description = "HYY车辆语义")
+    private String hyyCarDesc;
+
+    @Schema(description = "HYY公积金语义")
+    private String hyyProvidentDesc;
+
+    @Schema(description = "HYY社保语义")
+    private String hyySocialInsuranceDesc;
+
+    @Schema(description = "HYY投保语义")
+    private String hyyInsuranceDesc;
+
+    @Schema(description = "HYY职业语义")
+    private String hyyOccupationDesc;
+
+    @Schema(description = "HYY逾期情况语义")
+    private String hyyOverdueDesc;
+
+    @Schema(description = "HYY芝麻分档语义")
+    private String hyyZhimaDesc;
+
+    @Schema(description = "HYY贷款额度语义")
+    private String hyyLoanAmountDesc;
+
+    @Schema(description = "HYY推送IP")
+    private String hyyIp;
     /**
      * 跟进状态。 见业务字典定义
      */
@@ -184,6 +214,11 @@ public class CustomerItemDTO {
      */
     @Schema(description = "推广渠道ID。见业务字典定义")
     private Integer channel;
+    /**
+     * 用户来源（上游渠道推送的 channel_id）
+     */
+    @Schema(description = "用户来源（上游渠道推送的 channel_id）")
+    private String userSource;
     /**
      * 电话结果。见业务字典定义
      */
@@ -252,6 +287,11 @@ public class CustomerItemDTO {
      */
     @Schema(description = "收藏标识。 1:收藏; 其它:未收藏")
     private Integer ownerFavorite;
+    /**
+     * 公海重点标识。1:显示☆; 2:显示☆☆; 0:普通客户
+     */
+    @Schema(description = "公海重点标识。1:显示☆; 2:显示☆☆; 0:普通客户")
+    private Integer publicPoolStarFlag;
     /**
      * 创建时间
      */
@@ -351,6 +391,12 @@ public class CustomerItemDTO {
      */
     @Schema(description = "当前数据归属部门名称")
     private String ownerDeptName;
+
+    @Schema(description = "是否命中风险地区")
+    private Boolean riskRegionHit;
+
+    @Schema(description = "是否命中黑名单地区")
+    private Boolean blackRegionHit;
 
     /**
      * 资质信息描述（如，是否有房等）

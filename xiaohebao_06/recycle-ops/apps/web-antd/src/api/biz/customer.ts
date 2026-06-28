@@ -70,6 +70,12 @@ export interface PagedListCustomerParams {
   selfOnly?: boolean;
   /* 是否仅查询公海数据 */
   publicPoolOnly?: boolean;
+  /* 是否公海重点标识。1:☆或☆☆; 2:☆☆; 0:其他 */
+  publicPoolStarFlag?: number;
+  /* 地区筛选省份 */
+  regionProvince?: string;
+  /* 地区筛选城市 */
+  regionCity?: string;
 }
 
 export interface CustomerItem {
@@ -93,6 +99,7 @@ export interface CustomerItem {
 
   /* 芝麻分 */
   zhimaScore?: number;
+  hyyZhimaDesc?: string;
 
   /* 出生日期。 yyyy-MM-dd 格式 */
   birthday: string;
@@ -126,6 +133,7 @@ export interface CustomerItem {
 
   /* 目标贷款金额，单位元 */
   reqLoanAmount: number;
+  hyyLoanAmountDesc?: string;
 
   /* 房产标识。0:未知; 1:有京房; 2:有房; 3:无 */
   houseFlag: number;
@@ -156,6 +164,14 @@ export interface CustomerItem {
 
   /* 房产价值，单位万元 */
   houseVal: number;
+  hyyHouseDesc?: string;
+  hyyCarDesc?: string;
+  hyyProvidentDesc?: string;
+  hyySocialInsuranceDesc?: string;
+  hyyInsuranceDesc?: string;
+  hyyOccupationDesc?: string;
+  hyyOverdueDesc?: string;
+  hyyIp?: string;
 
   /* 跟进状态。 见业务字典定义 */
   progress: number;
@@ -171,6 +187,12 @@ export interface CustomerItem {
 
   /* 推广渠道ID */
   channel: number;
+
+  /* 上游渠道描述（channel 对应的字典名，列表展示「上游渠道」） */
+  channelDesc?: string;
+
+  /* 用户来源（上游渠道推送的 channel_id，列表展示「用户来源」） */
+  userSource?: string;
 
   /* 电话结果。见业务字典定义 */
   callTips: number;
@@ -204,6 +226,8 @@ export interface CustomerItem {
 
   /* 收藏标识。 1:收藏; 其它:未收藏 */
   ownerFavorite: number;
+  /* 公海重点标识。1:显示☆; 2:显示☆☆; 0:普通客户 */
+  publicPoolStarFlag?: number;
 
   /* 创建时间 */
   gmtCreate: Record<string, unknown>;
@@ -264,6 +288,10 @@ export interface CustomerItem {
   channelDesc?: string;
   /* 资质描述 */
   qualification?: string;
+  /* 是否命中风险地区 */
+  riskRegionHit?: boolean;
+  /* 是否命中黑名单地区 */
+  blackRegionHit?: boolean;
   /* 身份证号 */
   idCardNo?: string;
   /* 收藏类型描述 */
@@ -626,9 +654,7 @@ export const customerApi = {
   },
 
   getBizDictItems: async () => {
-    return await requestClient.get<Map<string, BizDictItem[]>>(
-      '/cust/list-dict-items',
-    );
+    return await requestClient.get<BizDictRepo>('/cust/list-dict-items');
   },
   getCustomerFieldConfig: () => {
     return requestClient.get<CustomerFieldConfigItem[]>('/cust/field-config');

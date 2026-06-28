@@ -16,6 +16,9 @@ public interface RiskReportService {
     RiskControlReportDO getReport(String name, String idCard, String phone, Long optUserId, Long optUserDeptId,
             Set<UserAuthRoleEnum> roles);
 
+    RiskControlReportDO getRadarReport(String name, String idCard, String phone, Long optUserId, Long optUserDeptId,
+            Set<UserAuthRoleEnum> roles);
+
     IPage<RiskControlReportDO> pageHistory(RiskHistoryPageRequest request, Long optUserId, Long optUserDeptId,
             Set<UserAuthRoleEnum> roles);
 }

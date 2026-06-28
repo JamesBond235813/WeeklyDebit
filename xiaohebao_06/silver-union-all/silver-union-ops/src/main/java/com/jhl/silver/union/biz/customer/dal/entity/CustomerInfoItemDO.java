@@ -210,6 +210,36 @@ public class CustomerInfoItemDO implements Serializable {
     @Schema(description = "房产价值，单位万元")
     private Integer houseVal;
 
+    @Schema(description = "HYY房产语义")
+    private String hyyHouseDesc;
+
+    @Schema(description = "HYY车辆语义")
+    private String hyyCarDesc;
+
+    @Schema(description = "HYY公积金语义")
+    private String hyyProvidentDesc;
+
+    @Schema(description = "HYY社保语义")
+    private String hyySocialInsuranceDesc;
+
+    @Schema(description = "HYY投保语义")
+    private String hyyInsuranceDesc;
+
+    @Schema(description = "HYY职业语义")
+    private String hyyOccupationDesc;
+
+    @Schema(description = "HYY逾期情况语义")
+    private String hyyOverdueDesc;
+
+    @Schema(description = "HYY芝麻分档语义")
+    private String hyyZhimaDesc;
+
+    @Schema(description = "HYY贷款额度语义")
+    private String hyyLoanAmountDesc;
+
+    @Schema(description = "HYY推送IP")
+    private String hyyIp;
+
     /**
      * 车牌号
      */
@@ -263,6 +293,12 @@ public class CustomerInfoItemDO implements Serializable {
      */
     @Schema(description = "推广渠道ID。见业务字典定义")
     private Integer channel;
+
+    /**
+     * 用户来源。上游渠道（如花易用）推送数据中的 channel_id，即上游渠道的上游来源。仅 HYY 推送写入。
+     */
+    @Schema(description = "用户来源（上游渠道推送的 channel_id）")
+    private String userSource;
 
     /**
      * 电话结果。见业务字典定义
@@ -341,6 +377,12 @@ public class CustomerInfoItemDO implements Serializable {
      */
     @Schema(description = "收藏标识。 0:再分配客户; 1:我的客户; 2:重点客户")
     private Integer ownerFavorite;
+
+    /**
+     * 公海重点标识。1:符合准入但无人在线导致进入公海; 0:普通公海客户
+     */
+    @Schema(description = "公海重点标识。1:符合准入但无人在线导致进入公海; 0:普通公海客户")
+    private Integer publicPoolStarFlag;
 
     /**
      * 创建时间
@@ -439,6 +481,8 @@ public class CustomerInfoItemDO implements Serializable {
 
     public static final String CHANNEL = "channel";
 
+    public static final String USER_SOURCE = "user_source";
+
     public static final String CALL_TIPS = "call_tips";
 
     public static final String CUSTOMER_GROUP = "customer_group";
@@ -464,6 +508,8 @@ public class CustomerInfoItemDO implements Serializable {
     public static final String OWNER_DEPT_ID = "owner_dept_id";
 
     public static final String OWNER_FAVORITE = "owner_favorite";
+
+    public static final String PUBLIC_POOL_STAR_FLAG = "public_pool_star_flag";
 
     public static final String GMT_CREATE = "gmt_create";
 

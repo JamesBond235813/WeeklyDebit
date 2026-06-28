@@ -11,9 +11,10 @@ import type { DeptInfo } from '#/api/biz/dept';
 
 import { onMounted, reactive, ref } from 'vue';
 
+import { useAccess } from '@vben/access';
 import { useVbenModal } from '@vben/common-ui';
 
-import { Button, message, Table } from 'ant-design-vue';
+import { Button, message, Table, Tag } from 'ant-design-vue';
 
 import { useVbenForm } from '#/adapter/form';
 import { customerApi } from '#/api/biz/customer';
@@ -26,9 +27,16 @@ const DATA_TIME_FMT = 'YYYY-MM-DD HH:mm:ss';
 const deptNameOptions = ref<{ label: string; value: number }[]>([]);
 const dataChannelOptions = ref<{ label: string; value: number }[]>([]);
 const bizDictRepoPromise = customerApi.getBizDictItems();
+const access = useAccess();
+const canSelectDept = access.hasAccessByRoles(['ROLE_SUPPER']);
+const canDispatch = access.hasAccessByRoles([
+  'ROLE_SUPPER',
+  'ROLE_DEPT_DATA_ADMIN',
+]);
+const canEditFactInfo = access.hasAccessByRoles(['ROLE_SUPPER']);
 // channelId - channelDesc map
 const channelMap = new Map<number, string>();
-const tableLoading: ref<boolean> = ref(false);
+const tableLoading = ref<boolean>(false);
 const pagination = ref<TablePaginationConfig>({});
 const custDescMap: Map<number, string> = new Map<number, string>();
 const customerItemsRef = ref<PagedInfo<CustomerItem>>({
@@ -62,16 +70,83 @@ function initOptions() {
       channelMap.set(e.intValue, e.label);
     });
   });
-  const deptPromise = deptApi.listDeptInfo({
-    status: 1,
-    needExtendQry: false,
-  });
-  deptPromise.then((res) => {
-    deptNameOptions.value = res.map((e: DeptInfo) => {
-      return { label: e.deptName, value: e.id };
+  if (canSelectDept) {
+    const deptPromise = deptApi.listDeptInfo({
+      status: 1,
+      needExtendQry: false,
     });
+    deptPromise.then((res) => {
+      deptNameOptions.value = res.map((e: DeptInfo) => {
+        return { label: e.deptName, value: e.id };
+      });
+    });
+  }
+}
+
+const searchSchema: any[] = [
+  {
+    component: 'Input',
+    fieldName: 'mobile',
+    label: '手机号',
+    componentProps: {
+      placeholder: '精确查询',
+    },
+  },
+  {
+    component: 'Input',
+    fieldName: 'namePrefix',
+    label: '客户姓名',
+    componentProps: {
+      placeholder: '可按姓名前缀查询',
+    },
+  },
+];
+
+if (canSelectDept) {
+  searchSchema.push({
+    component: 'Select',
+    fieldName: 'ownerDeptIds',
+    label: '所属部门',
+    componentProps: {
+      placeholder: '不限部门',
+      allowClear: true,
+      showSearch: true,
+      filterOption: (inputValue: string, option: { label: string }) => {
+        return option.label.toLowerCase().includes(inputValue.toLowerCase());
+      },
+      options: deptNameOptions,
+      mode: 'multiple',
+    },
   });
 }
+
+searchSchema.push(
+  {
+    component: 'RangePicker',
+    fieldName: 'applyDatePicker',
+    label: '申请时间',
+    componentProps: {
+      showTime: true,
+      showNow: true,
+      showToday: true,
+      placeholder: ['开始时间', '结束时间'],
+    },
+  },
+  {
+    component: 'Select',
+    fieldName: 'channel',
+    label: '渠道',
+    componentProps: {
+      placeholder: '不限',
+      allowClear: true,
+      options: dataChannelOptions,
+      showSearch: true,
+      filterOption: (inputValue: string, option: { label: string }) => {
+        return option.label.toLowerCase().includes(inputValue.toLowerCase());
+      },
+    },
+  },
+);
 
 const [MngSearchForm, mngSearchFormApi] = useVbenForm({
   wrapperClass: 'grid-cols-3',
@@ -84,65 +159,7 @@ const [MngSearchForm, mngSearchFormApi] = useVbenForm({
       class: 'w-full border-1',
     },
   },
-  schema: [
-    {
-      component: 'Input',
-      fieldName: 'mobile',
-      label: '手机号',
-      componentProps: {
-        placeholder: '精确查询',
-      },
-    },
-    {
-      component: 'Input',
-      fieldName: 'namePrefix',
-      label: '客户姓名',
-      componentProps: {
-        placeholder: '可按姓名前缀查询',
-      },
-    },
-
-    {
-      component: 'Select',
-      fieldName: 'ownerDeptIds',
-      label: '所属部门',
-      componentProps: {
-        placeholder: '不限部门',
-        allowClear: true,
-        showSearch: true,
-        filterOption: (inputValue: string, option: { label: string }) => {
-          return option.label.toLowerCase().includes(inputValue.toLowerCase());
-        },
-        options: deptNameOptions,
-        mode: 'multiple',
-      },
-    },
-    {
-      component: 'RangePicker',
-      fieldName: 'applyDatePicker',
-      label: '申请时间',
-      componentProps: {
-        showTime: true,
-        showNow: true,
-        showToday: true,
-        placeholder: ['开始时间', '结束时间'],
-      },
-    },
-    {
-      component: 'Select',
-      fieldName: 'channel',
-      label: '渠道',
-      componentProps: {
-        placeholder: '不限',
-        allowClear: true,
-        options: dataChannelOptions,
-        showSearch: true,
-        filterOption: (inputValue: string, option: { label: string }) => {
-          return option.label.toLowerCase().includes(inputValue.toLowerCase());
-        },
-      },
-    },
-  ],
+  schema: searchSchema,
   submitButtonOptions: {
     content: '查询',
     // size: 'small',
@@ -208,7 +225,7 @@ const columns: TableColumnType<CustomerItem>[] = [
 async function pagedListCustomerInfo(formValues?: any) {
   tableLoading.value = true;
 
-  const data: PagedInfo<CustomerItem> = await customerApi.pagedListCustomerInfo(
+  const data = (await customerApi.pagedListCustomerInfo(
     {
       ...formValues,
       applyDateStart: formValues.applyDatePicker?.[0].format(DATA_TIME_FMT),
@@ -216,7 +233,7 @@ async function pagedListCustomerInfo(formValues?: any) {
       page: formValues?.page ?? 1,
       pageSize: formValues?.pageSize ?? 30,
     },
-  );
+  )) as PagedInfo<CustomerItem>;
   custDescMap.clear();
   data.list?.forEach((item: CustomerItem) => {
     item.key = item.id;
@@ -250,6 +267,7 @@ async function openEditCustInfoModal(cid?: number) {
   const modalData = {
     deptNameOptions,
     dataChannelOptions,
+    canSelectDept,
     callbackFunc: async () => {
       await pagedListCustomerInfo(formValues);
     },
@@ -293,8 +311,8 @@ const state = reactive<{
   selectedRowKeys: [], // Check here to configure the default column
   loading: false,
 });
-const onSelectChange = (selectedRowKeys: number[]) => {
-  state.selectedRowKeys = selectedRowKeys;
+const onSelectChange = (selectedRowKeys: (number | string)[]) => {
+  state.selectedRowKeys = selectedRowKeys.map((key) => Number(key));
 };
 const viewportHeight = document.documentElement.clientHeight - 360;
 
@@ -324,10 +342,12 @@ const handleTableChange: TableProps['onChange'] = async (pag) => {
   <div
     class="cust-mng-table mt-5 w-full rounded-lg border border-gray-200 bg-white shadow-sm transition-colors duration-200 dark:border-[#1f2a44] dark:bg-[#0b1220] dark:text-[#c7d2fe]"
   >
-    <span class="m-2">批量操作:</span>
-    <Button size="small" type="link" class="m-2" @click="batchAssign">
-      分配
-    </Button>
+    <template v-if="canDispatch">
+      <span class="m-2">批量操作:</span>
+      <Button size="small" type="link" class="m-2" @click="batchAssign">
+        分配
+      </Button>
+    </template>
     <Button
       size="small"
       type="primary"
@@ -354,8 +374,24 @@ const handleTableChange: TableProps['onChange'] = async (pag) => {
       bordered
     >
       <template #bodyCell="{ column, record }">
+        <template v-if="column.key === 'name' || column.dataIndex === 'name'">
+          <span class="customer-name-cell">
+            <span>{{ record.name }}</span>
+            <Tag v-if="record.riskRegionHit" color="red" class="region-hit-tag">
+              风
+            </Tag>
+            <Tag
+              v-if="record.blackRegionHit"
+              color="black"
+              class="region-hit-tag"
+            >
+              黑
+            </Tag>
+          </span>
+        </template>
         <template v-if="column.key === 'action'">
           <Button
+            v-if="canEditFactInfo"
             size="small"
             type="link"
             class="-m-2 p-1"
@@ -434,5 +470,18 @@ const handleTableChange: TableProps['onChange'] = async (pag) => {
   background: transparent;
   border-color: #1f2a44;
   color: #cbd5e1;
+}
+
+.customer-name-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.region-hit-tag {
+  margin-inline-end: 0;
+  padding-inline: 4px;
+  line-height: 18px;
 }
 </style>

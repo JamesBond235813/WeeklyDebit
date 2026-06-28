@@ -132,6 +132,9 @@ public class CustomerInfoQry {
 
     private Boolean selfOnly;
     private Boolean publicPoolOnly;
+    private Integer publicPoolStarFlag;
+    private String regionProvince;
+    private String regionCity;
 
     /**
      * 增加客户 ID
@@ -199,10 +202,52 @@ public class CustomerInfoQry {
                 .eq(Objects.nonNull(this.customerGroup), CustomerInfoItemDO::getCustomerGroup, this.customerGroup)
                 .eq(Objects.nonNull(this.callTips), CustomerInfoItemDO::getCallTips, this.callTips)
                 .eq(Objects.nonNull(this.version), CustomerInfoItemDO::getOwnerFavorite, this.version)
+                .in(Objects.equals(this.publicPoolStarFlag, 1), CustomerInfoItemDO::getPublicPoolStarFlag, List.of(1, 2))
+                .eq(Objects.equals(this.publicPoolStarFlag, 2), CustomerInfoItemDO::getPublicPoolStarFlag, 2)
                 .ge(Objects.nonNull(this.zhimaScoreMin), CustomerInfoItemDO::getZhimaScore, this.zhimaScoreMin)
                 .in(!CollectionUtils.isEmpty(this.channelList), CustomerInfoItemDO::getChannel, this.channelList)
                 .eq(CollectionUtils.isEmpty(this.channelList) && Objects.nonNull(this.channel),
                         CustomerInfoItemDO::getChannel, this.channel);
+        if (StringUtils.isNotBlank(this.regionProvince)) {
+            String province = this.regionProvince.trim();
+            String city = StringUtils.trimToEmpty(this.regionCity);
+            List<String> provinceValues = areaVariants(province);
+            List<String> cityValues = areaVariants(city);
+            queryWrapper.and(qw -> {
+                qw.and(mobileQw -> {
+                            mobileQw.and(areaQw -> {
+                                for (int i = 0; i < provinceValues.size(); i++) {
+                                    if (i > 0) {
+                                        areaQw.or();
+                                    }
+                                    areaQw.like(CustomerInfoItemDO::getMobileArea, provinceValues.get(i));
+                                }
+                            });
+                            if (!CollectionUtils.isEmpty(cityValues)) {
+                                mobileQw.and(areaQw -> {
+                                    for (int i = 0; i < cityValues.size(); i++) {
+                                        if (i > 0) {
+                                            areaQw.or();
+                                        }
+                                        areaQw.like(CustomerInfoItemDO::getMobileArea, cityValues.get(i));
+                                    }
+                                });
+                            }
+                        })
+                        .or()
+                        .and(idCardQw -> {
+                            idCardQw.in(CustomerInfoItemDO::getHukouProvince, provinceValues);
+                            if (!CollectionUtils.isEmpty(cityValues)) {
+                                idCardQw.in(CustomerInfoItemDO::getHukouCity, cityValues);
+                            }
+                        });
+            });
+        }
+        if (Objects.equals(this.publicPoolStarFlag, 0)) {
+            queryWrapper.and(qw -> qw.isNull(CustomerInfoItemDO::getPublicPoolStarFlag)
+                    .or()
+                    .eq(CustomerInfoItemDO::getPublicPoolStarFlag, 0));
+        }
         if (Objects.nonNull(this.ownerFavorite)) {
             // 查询收藏类型时， 要求带上归属人
             queryWrapper.eq(CustomerInfoItemDO::getOwnerFavorite, this.ownerFavorite)
@@ -219,7 +264,8 @@ public class CustomerInfoQry {
                     .le(CustomerInfoItemDO::getFollowTime, baseDate);
         }
         if (Boolean.TRUE.equals(this.publicPoolOnly)) {
-            queryWrapper.eq(CustomerInfoItemDO::getOwnerUserId, 0L);
+            queryWrapper.eq(CustomerInfoItemDO::getOwnerUserId, 0L)
+                    .in(!CollectionUtils.isEmpty(this.ids), CustomerInfoItemDO::getId, this.ids);
         } else if (Boolean.TRUE.equals(this.selfOnly)) {
             queryWrapper.eq(Objects.nonNull(this.ownerUserId), CustomerInfoItemDO::getOwnerUserId, this.ownerUserId);
         } else {
@@ -268,7 +314,10 @@ public class CustomerInfoQry {
                 .setZhimaScoreMin(request.getZhimaScoreMin())
                 .setChannel(request.getChannel())
                 .setSelfOnly(request.getSelfOnly())
-                .setPublicPoolOnly(request.getPublicPoolOnly());
+                .setPublicPoolOnly(request.getPublicPoolOnly())
+                .setPublicPoolStarFlag(request.getPublicPoolStarFlag())
+                .setRegionProvince(request.getRegionProvince())
+                .setRegionCity(request.getRegionCity());
         if (!CollectionUtils.isEmpty(request.getProgressList())) {
             qry.setProgressList(request.getProgressList());
         }
@@ -289,6 +338,30 @@ public class CustomerInfoQry {
             log.error("Parsing date [{}] failed: {}", dateStr, e.getMessage());
             return null;
         }
+    }
+
+    private static List<String> areaVariants(String areaName) {
+        if (StringUtils.isBlank(areaName)) {
+            return List.of();
+        }
+        LinkedHashSet<String> values = new LinkedHashSet<>();
+        String normalized = areaName.trim();
+        values.add(normalized);
+        String shortName = normalized
+                .replace("维吾尔自治区", "")
+                .replace("壮族自治区", "")
+                .replace("回族自治区", "")
+                .replace("特别行政区", "")
+                .replace("自治区", "")
+                .replace("自治州", "")
+                .replace("地区", "")
+                .replace("盟", "")
+                .replace("省", "")
+                .replace("市", "");
+        if (StringUtils.isNotBlank(shortName)) {
+            values.add(shortName);
+        }
+        return new ArrayList<>(values);
     }
 
 }

@@ -37,4 +37,10 @@ public class HyyPushRequest {
     private Integer occupation;
     private Integer insurance;
     private String ip;
+    /**
+     * 上游渠道推送数据的来源（即上游渠道的上游渠道），原样存入客户「用户来源」。
+     */
+    @JsonProperty("channel_id")
+    @SerializedName("channel_id")
+    private String channelId;
 }

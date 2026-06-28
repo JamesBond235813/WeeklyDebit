@@ -77,6 +77,17 @@ public class UserMngController {
     }
 
     /**
+     * 统计当前用户可管理范围内的在线用户数
+     *
+     * @return
+     */
+    @GetMapping("/online-count")
+    @Operation(summary = "统计当前用户可管理范围内的在线用户数")
+    public SuResult<Long> countOnlineUsers() {
+        return SuResultUtils.successResult(userService.countManageableOnlineUsers(UserContext.getUserId()));
+    }
+
+    /**
      * 新增用户信息
      *
      * @param request

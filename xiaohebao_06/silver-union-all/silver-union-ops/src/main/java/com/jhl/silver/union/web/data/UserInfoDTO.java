@@ -57,6 +57,12 @@ public class UserInfoDTO {
     private Integer status;
 
     /**
+     * 用户在线状态。 1：在线。 0：离线
+     */
+    @Schema(description = "用户在线状态。 1：在线。 0：离线")
+    private Integer onlineStatus;
+
+    /**
      * 性别。 0:保密, 1:男, 2:女
      */
     @Schema(description = "性别。 0:保密, 1:男, 2:女")

@@ -52,6 +52,8 @@ public interface ImportCustDataService {
      */
     void addCustInfo(List<PushCustInfoItem> itemList, Long targetDeptId, Long targetUserId);
 
+    void addApiPushedCustInfo(List<PushCustInfoItem> itemList, Long targetDeptId, Long targetUserId);
+
     /**
      * 分页获取导入记录
      *

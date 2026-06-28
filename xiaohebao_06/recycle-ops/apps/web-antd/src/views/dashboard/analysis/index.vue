@@ -1,369 +1,393 @@
 <script lang="ts" setup>
-import { ref, onMounted, onBeforeUnmount, nextTick, computed } from 'vue';
-import { Card, Row, Col, Table, Tag, Empty } from 'ant-design-vue';
-import * as echarts from 'echarts';
-import { useAccess } from '@vben/access';
-import { getDashboardSummary, type StatsDashboardVO } from '#/api/biz/stats';
+import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import { Button, Card, DatePicker, Empty, Select, Space, Table, Tag, message } from 'ant-design-vue';
+import type { ECharts } from 'echarts';
 
-// 权限控制
-const access = useAccess();
-const isManagement = access.hasAccessByRoles(['ROLE_SUPPER', 'ROLE_ADMIN', 'ROLE_MANAGER', 'ROLE_DEPT_ADMIN', 'ROLE_DEPT_DATA_ADMIN']);
+import {
+  getChannelTrend,
+  getDashboardChannels,
+  getSalesAssignmentStats,
+  getStarPublicPoolEntryTrend,
+  getTodayHourlyAdmissionStats,
+  type ChannelPushTrendVO,
+  type SalesAssignmentStatsItemVO,
+} from '#/api/biz/stats';
 
 const loading = ref(false);
-const data = ref<StatsDashboardVO | null>(null);
-const periodKpis = computed(() => {
-  if (!data.value) {
-    return [];
-  }
-  return [
-    { label: '今日', data: data.value.todayKpi },
-    { label: '近7日', data: data.value.recent7Kpi },
-    { label: '近30日', data: data.value.recent30Kpi },
-  ];
-});
+const filterRange = ref<[string, string]>([offsetDate(6), offsetDate(0)]);
+const selectedChannel = ref<string | undefined>();
+const channelOptions = ref<string[]>([]);
+const assignmentRows = ref<SalesAssignmentStatsItemVO[]>([]);
+const inboundEmpty = ref(false);
+const admissionEmpty = ref(false);
+const starEmpty = ref(false);
+const hourlyEmpty = ref(false);
 
-function formatMoney(value?: number) {
-  const num = Number(value || 0);
-  return num.toFixed(2);
-}
+const inboundChartRef = ref<HTMLDivElement | null>(null);
+const admissionChartRef = ref<HTMLDivElement | null>(null);
+const starChartRef = ref<HTMLDivElement | null>(null);
+const hourlyChartRef = ref<HTMLDivElement | null>(null);
+let echartsModule: typeof import('echarts') | null = null;
+let inboundChart: ECharts | null = null;
+let admissionChart: ECharts | null = null;
+let starChart: ECharts | null = null;
+let hourlyChart: ECharts | null = null;
 
-function formatCount(value?: number) {
-  const num = Number(value || 0);
-  return Number.isFinite(num) ? num : 0;
-}
-
-// Chart Refs
-const trendChartRef = ref<HTMLDivElement | null>(null);
-const funnelChartRef = ref<HTMLDivElement | null>(null);
-const regionChartRef = ref<HTMLDivElement | null>(null);
-const ageChartRef = ref<HTMLDivElement | null>(null);
-const sexChartRef = ref<HTMLDivElement | null>(null);
-
-const leaderboardColumns = [
-  { title: '排名', dataIndex: 'rank', width: 60, align: 'center' },
-  { title: '姓名', dataIndex: 'name' },
-  { title: '部门', dataIndex: 'department' },
-  { title: '客户数', dataIndex: 'newCustomers', sorter: (a:any, b:any) => a.newCustomers - b.newCustomers }, // 暂用总客户数
-  // { title: '跟进次数', dataIndex: 'followUps', sorter: (a:any, b:any) => a.followUps - b.followUps },
+const assignmentColumns = [
+  { title: '业务员', dataIndex: 'userName', width: 120 },
+  { title: '部门', dataIndex: 'deptName', width: 150 },
+  { title: '自动分配', dataIndex: 'autoCount', align: 'right', width: 90 },
+  { title: '公海领取', dataIndex: 'manualCount', align: 'right', width: 90 },
+  { title: '带☆领取', dataIndex: 'starManualCount', align: 'right', width: 90 },
+  { title: '合计', dataIndex: 'totalCount', align: 'right', width: 80 },
 ];
 
-const trendDayOptions = [3, 5, 7, 10, 15, 30];
-const selectedTrendDays = ref(30);
+function offsetDate(offset: number) {
+  const date = new Date();
+  date.setDate(date.getDate() - offset);
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
 
-onMounted(async () => {
+async function ensureEcharts() {
+  if (!echartsModule) {
+    echartsModule = await import('echarts');
+  }
+  return echartsModule;
+}
+
+function getRange() {
+  const [startDate, endDate] = filterRange.value || [];
+  return {
+    startDate: startDate || offsetDate(6),
+    endDate: endDate || offsetDate(0),
+  };
+}
+
+function buildLineSeries(data: ChannelPushTrendVO) {
+  return data.channels.map((channel) => ({
+    name: channel,
+    type: 'line',
+    smooth: true,
+    symbolSize: 5,
+    data: data.series[channel] || [],
+  }));
+}
+
+function hasLineData(data: ChannelPushTrendVO) {
+  return data.channels.some((channel) => (data.series[channel] || []).some((value) => Number(value) > 0));
+}
+
+function hasNumberData(values?: number[]) {
+  return Array.isArray(values) && values.some((value) => Number(value) > 0);
+}
+
+async function renderChannelChart(target: 'inbound' | 'admission') {
+  const echarts = await ensureEcharts();
+  const { startDate, endDate } = getRange();
+  const data = await getChannelTrend(startDate, endDate, selectedChannel.value, target === 'admission');
+  const isEmpty = !hasLineData(data);
+  if (target === 'inbound') {
+    inboundEmpty.value = isEmpty;
+  } else {
+    admissionEmpty.value = isEmpty;
+  }
+  await nextTick();
+  const chartRef = target === 'inbound' ? inboundChartRef : admissionChartRef;
+  if (!chartRef.value) {
+    return;
+  }
+  const chart = target === 'inbound'
+    ? (inboundChart ??= echarts.init(chartRef.value))
+    : (admissionChart ??= echarts.init(chartRef.value));
+  if (isEmpty) {
+    chart.clear();
+    return;
+  }
+  chart.setOption({
+    tooltip: { trigger: 'axis' },
+    legend: { type: 'scroll', top: 0, itemWidth: 14, itemHeight: 8 },
+    grid: { left: 18, right: 16, top: 34, bottom: 22, containLabel: true },
+    xAxis: { type: 'category', boundaryGap: false, data: data.dates },
+    yAxis: { type: 'value', minInterval: 1 },
+    series: buildLineSeries(data),
+  }, true);
+}
+
+async function renderStarChart() {
+  const echarts = await ensureEcharts();
+  const { startDate, endDate } = getRange();
+  const data = await getStarPublicPoolEntryTrend(startDate, endDate);
+  starEmpty.value = !hasNumberData(data.starEntryCounts);
+  await nextTick();
+  if (!starChartRef.value) {
+    return;
+  }
+  starChart ??= echarts.init(starChartRef.value);
+  if (starEmpty.value) {
+    starChart.clear();
+    return;
+  }
+  starChart.setOption({
+    tooltip: { trigger: 'axis' },
+    grid: { left: 18, right: 16, top: 18, bottom: 22, containLabel: true },
+    xAxis: { type: 'category', boundaryGap: false, data: data.dates },
+    yAxis: { type: 'value', minInterval: 1 },
+    series: [{ name: '每日推入公海☆', type: 'line', smooth: true, symbolSize: 5, data: data.starEntryCounts }],
+  }, true);
+}
+
+async function renderHourlyChart() {
+  const echarts = await ensureEcharts();
+  const data = await getTodayHourlyAdmissionStats(selectedChannel.value);
+  hourlyEmpty.value = !hasNumberData(data.passedCounts) && !hasNumberData(data.passRates);
+  await nextTick();
+  if (!hourlyChartRef.value) {
+    return;
+  }
+  hourlyChart ??= echarts.init(hourlyChartRef.value);
+  if (hourlyEmpty.value) {
+    hourlyChart.clear();
+    return;
+  }
+  hourlyChart.setOption({
+    tooltip: {
+      trigger: 'axis',
+      valueFormatter: (value: number | string) => `${value}`,
+    },
+    legend: { top: 0, itemWidth: 14, itemHeight: 8 },
+    grid: { left: 18, right: 34, top: 34, bottom: 22, containLabel: true },
+    xAxis: { type: 'category', boundaryGap: true, data: data.hours },
+    yAxis: [
+      { type: 'value', minInterval: 1, name: '数量' },
+      { type: 'value', min: 0, max: 100, name: '通过率', axisLabel: { formatter: '{value}%' } },
+    ],
+    series: [
+      { name: '符合准入量', type: 'bar', yAxisIndex: 0, data: data.passedCounts, barMaxWidth: 24 },
+      { name: '通过率', type: 'line', smooth: true, yAxisIndex: 1, data: data.passRates },
+    ],
+  }, true);
+}
+
+async function loadAssignmentStats() {
+  const { startDate, endDate } = getRange();
+  assignmentRows.value = await getSalesAssignmentStats(startDate, endDate);
+}
+
+async function refreshAll() {
+  const { startDate, endDate } = getRange();
+  if (!startDate || !endDate) {
+    message.warning('请选择日期区间');
+    return;
+  }
   loading.value = true;
   try {
-    data.value = await getDashboardSummary();
-    // Ensure DOM updated before initializing charts
-    await nextTick();
-    initCharts();
-  } catch (e) {
-    console.error(e);
+    await Promise.all([
+      renderChannelChart('inbound'),
+      renderChannelChart('admission'),
+      renderStarChart(),
+      renderHourlyChart(),
+      loadAssignmentStats(),
+    ]);
   } finally {
     loading.value = false;
   }
-  window.addEventListener('resize', resizeCharts);
-});
-
-let trendChart: echarts.ECharts | null = null;
-let funnelChart: echarts.ECharts | null = null;
-let regionChart: echarts.ECharts | null = null;
-let ageChart: echarts.ECharts | null = null;
-let sexChart: echarts.ECharts | null = null;
-
-function getTrendSlice(days: number) {
-  if (!data.value) {
-    return { dates: [], newCustomers: [], orderCounts: [] };
-  }
-  const trend = data.value.trend;
-  const total = trend?.dates?.length ?? 0;
-  const size = Math.min(days, total);
-  const start = Math.max(total - size, 0);
-  return {
-    dates: trend?.dates?.slice(start) ?? [],
-    newCustomers: trend?.newCustomers?.slice(start) ?? [],
-    orderCounts: trend?.orderCounts?.slice(start) ?? [],
-  };
 }
 
-function buildTrendOption(days: number) {
-  const slice = getTrendSlice(days);
-  return {
-    title: { text: `近${days}天新增趋势`, left: 'left' },
-    tooltip: { trigger: 'axis' },
-    legend: { data: ['新增客户', '订单数量'], top: 6, right: 12 },
-    grid: { left: 24, right: 24, top: 56, bottom: 50, containLabel: true },
-    xAxis: {
-      type: 'category',
-      boundaryGap: false,
-      data: slice.dates,
-      axisLabel: { rotate: 30, margin: 12 },
-    },
-    yAxis: { type: 'value', minInterval: 1 },
-    series: [
-      { name: '新增客户', type: 'line', data: slice.newCustomers, smooth: true, itemStyle: { color: '#1890ff' } },
-      { name: '订单数量', type: 'line', data: slice.orderCounts, smooth: true, itemStyle: { color: '#52c41a' } },
-    ],
-  };
-}
-
-function updateTrendChart(days: number) {
-  if (!trendChart) {
-    return;
-  }
-  trendChart.setOption(buildTrendOption(days));
-}
-
-function handleTrendDaysChange(days: number) {
-  selectedTrendDays.value = days;
-  updateTrendChart(days);
-}
-
-function initCharts() {
-  if (!data.value) return;
-
-  // Trend
-  if (trendChartRef.value) {
-    trendChart = echarts.init(trendChartRef.value);
-    trendChart.setOption(buildTrendOption(selectedTrendDays.value));
-  }
-
-  // Funnel
-  if (funnelChartRef.value) {
-    funnelChart = echarts.init(funnelChartRef.value);
-    funnelChart.setOption({
-      title: { text: '客户状态漏斗' },
-      tooltip: { trigger: 'item', formatter: '{a} <br/>{b} : {c}' },
-      series: [
-        {
-          name: '漏斗图',
-          type: 'funnel',
-          left: '10%',
-          top: 60,
-          bottom: 60,
-          width: '80%',
-          min: 0,
-          maxSize: '100%',
-          sort: 'descending',
-          gap: 2,
-          label: { show: true, position: 'inside' },
-          itemStyle: { borderColor: '#fff', borderWidth: 1 },
-          data: data.value.funnel
-        }
-      ]
-    });
-  }
-  
-  // Sex (Pie)
-  if (sexChartRef.value && data.value.distribution.sex.length) {
-      sexChart = echarts.init(sexChartRef.value);
-      sexChart.setOption({
-          title: { text: '性别占比', left: 'center' },
-          tooltip: { trigger: 'item' },
-          series: [{ type: 'pie', radius: '50%', data: data.value.distribution.sex }]
-      });
-  }
-  
-  // Age (Bar)
-  if (ageChartRef.value && data.value.distribution.age.length) {
-      ageChart = echarts.init(ageChartRef.value);
-      ageChart.setOption({
-          title: { text: '年龄分布', left: 'center' },
-          tooltip: { trigger: 'axis' },
-          xAxis: { type: 'category', data: data.value.distribution.age.map(i => i.name) },
-          yAxis: { type: 'value' },
-          series: [{ type: 'bar', data: data.value.distribution.age.map(i => i.value), itemStyle: { color: '#52c41a' } }]
-      });
-  }
-  
-  // Region (Bar Horizontal)
-  if (regionChartRef.value && data.value.distribution.region.length) {
-      regionChart = echarts.init(regionChartRef.value);
-      regionChart.setOption({
-          title: { text: '地域分布 (Top 10)', left: 'center' },
-          tooltip: { trigger: 'axis' },
-          grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
-          xAxis: { type: 'value' },
-          yAxis: { type: 'category', data: data.value.distribution.region.map(i => i.name).reverse() },
-          series: [{ type: 'bar', data: data.value.distribution.region.map(i => i.value).reverse(), itemStyle: { color: '#faad14' } }]
-      });
-  }
+async function loadChannelOptions() {
+  channelOptions.value = await getDashboardChannels();
 }
 
 function resizeCharts() {
-  trendChart?.resize();
-  funnelChart?.resize();
-  regionChart?.resize();
-  ageChart?.resize();
-  sexChart?.resize();
+  inboundChart?.resize();
+  admissionChart?.resize();
+  starChart?.resize();
+  hourlyChart?.resize();
 }
+
+onMounted(async () => {
+  await loadChannelOptions();
+  await refreshAll();
+  window.addEventListener('resize', resizeCharts);
+});
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', resizeCharts);
-  trendChart?.dispose();
-  funnelChart?.dispose();
-  regionChart?.dispose();
-  ageChart?.dispose();
-  sexChart?.dispose();
-  trendChart = funnelChart = regionChart = ageChart = sexChart = null;
+  inboundChart?.dispose();
+  admissionChart?.dispose();
+  starChart?.dispose();
+  hourlyChart?.dispose();
+  inboundChart = null;
+  admissionChart = null;
+  starChart = null;
+  hourlyChart = null;
 });
-
 </script>
 
 <template>
-  <div class="p-4" v-if="data">
-    <!-- Period KPI -->
-    <Card :bordered="false" class="mb-4">
-      <div class="space-y-4">
-        <div
-          v-for="item in periodKpis"
-          :key="item.label"
-          class="grid grid-cols-6 gap-4 items-stretch"
+  <div class="dashboard-page">
+    <Card class="filter-card" :bordered="false">
+      <Space wrap>
+        <DatePicker.RangePicker
+          v-model:value="filterRange"
+          value-format="YYYY-MM-DD"
+          :allow-clear="false"
+          size="small"
+        />
+        <Select
+          v-model:value="selectedChannel"
+          allow-clear
+          class="channel-select"
+          placeholder="全部渠道"
+          size="small"
         >
-          <div
-            class="flex items-center justify-center rounded bg-blue-50 text-blue-700 text-sm font-semibold dark:bg-[#0f172a] dark:text-[#93c5fd]"
-          >
-            {{ item.label }}
-          </div>
-          <div class="col-span-5 grid grid-cols-5 gap-4">
-            <div class="rounded border border-gray-100 bg-white p-3 text-center shadow-sm dark:border-[#1f2a44] dark:bg-[#0b1220]">
-              <div class="text-xs text-gray-500 dark:text-[#94a3b8]">毛收入</div>
-              <div class="text-lg font-semibold text-red-600">¥{{ formatMoney(item.data?.grossProfit) }}</div>
-            </div>
-            <div class="rounded border border-gray-100 bg-white p-3 text-center shadow-sm dark:border-[#1f2a44] dark:bg-[#0b1220]">
-              <div class="text-xs text-gray-500 dark:text-[#94a3b8]">渠道返佣总额</div>
-              <div class="text-lg font-semibold">¥{{ formatMoney(item.data?.channelCommission) }}</div>
-            </div>
-            <div class="rounded border border-gray-100 bg-white p-3 text-center shadow-sm dark:border-[#1f2a44] dark:bg-[#0b1220]">
-              <div class="text-xs text-gray-500 dark:text-[#94a3b8]">成交数</div>
-              <div class="text-lg font-semibold">{{ formatCount(item.data?.orderCount) }}</div>
-            </div>
-            <div class="rounded border border-gray-100 bg-white p-3 text-center shadow-sm dark:border-[#1f2a44] dark:bg-[#0b1220]">
-              <div class="text-xs text-gray-500 dark:text-[#94a3b8]">进行中订单</div>
-              <div class="text-lg font-semibold text-amber-600">{{ formatCount(item.data?.pendingOrderCount) }}</div>
-            </div>
-            <div class="rounded border border-gray-100 bg-white p-3 text-center shadow-sm dark:border-[#1f2a44] dark:bg-[#0b1220]">
-              <div class="text-xs text-gray-500 dark:text-[#94a3b8]">新增客户</div>
-              <div class="text-lg font-semibold">{{ formatCount(item.data?.newCustomers) }}</div>
-            </div>
-          </div>
-        </div>
-      </div>
+          <Select.Option v-for="item in channelOptions" :key="item" :value="item">{{ item }}</Select.Option>
+        </Select>
+        <Button size="small" type="primary" @click="refreshAll">查询</Button>
+      </Space>
     </Card>
 
-    <!-- Charts -->
-    <Row :gutter="16" class="mb-4">
-      <Col :span="16">
-        <Card title="数据趋势分析" :bordered="false">
-          <template #extra>
-            <div class="trend-range">
-              <button
-                v-for="days in trendDayOptions"
-                :key="days"
-                type="button"
-                class="trend-range-item"
-                :class="{ active: selectedTrendDays === days }"
-                @click="handleTrendDaysChange(days)"
-              >
-                {{ days }}天
-              </button>
-            </div>
-          </template>
-          <div ref="trendChartRef" style="height: 350px;"></div>
-        </Card>
-      </Col>
-      <Col :span="8">
-        <Card title="客户状态漏斗" :bordered="false">
-          <div ref="funnelChartRef" style="height: 350px;"></div>
-        </Card>
-      </Col>
-    </Row>
-    
-    <!-- Distribution Charts -->
-     <Row :gutter="16" class="mb-4">
-      <Col :span="8">
-        <Card title="地域分布" :bordered="false">
-          <div ref="regionChartRef" style="height: 300px;">
-             <Empty v-if="!data.distribution.region.length" description="暂无地域数据" />
-          </div>
-        </Card>
-      </Col>
-      <Col :span="8">
-        <Card title="年龄分布" :bordered="false">
-          <div ref="ageChartRef" style="height: 300px;">
-             <Empty v-if="!data.distribution.age.length" description="暂无年龄数据" />
-          </div>
-        </Card>
-      </Col>
-      <Col :span="8">
-        <Card title="性别分布" :bordered="false">
-          <div ref="sexChartRef" style="height: 300px;">
-             <Empty v-if="!data.distribution.sex.length" description="暂无性别数据" />
-          </div>
-        </Card>
-      </Col>
-    </Row>
+    <div class="chart-grid">
+      <Card title="渠道每日入库量" :bordered="false" size="small" class="chart-card">
+        <div class="chart-box">
+          <div ref="inboundChartRef" class="chart" :class="{ hidden: inboundEmpty }"></div>
+          <Empty v-if="inboundEmpty" class="chart-empty" description="暂无入库数据" />
+        </div>
+      </Card>
+      <Card title="渠道每日符合准入量" :bordered="false" size="small" class="chart-card">
+        <div class="chart-box">
+          <div ref="admissionChartRef" class="chart" :class="{ hidden: admissionEmpty }"></div>
+          <Empty v-if="admissionEmpty" class="chart-empty" description="暂无准入统计数据" />
+        </div>
+      </Card>
+      <Card title="☆公海客户趋势" :bordered="false" size="small" class="chart-card">
+        <div class="chart-box">
+          <div ref="starChartRef" class="chart" :class="{ hidden: starEmpty }"></div>
+          <Empty v-if="starEmpty" class="chart-empty" description="暂无☆公海数据" />
+        </div>
+      </Card>
+      <Card title="今日每小时准入量 / 通过率" :bordered="false" size="small" class="chart-card">
+        <div class="chart-box">
+          <div ref="hourlyChartRef" class="chart" :class="{ hidden: hourlyEmpty }"></div>
+          <Empty v-if="hourlyEmpty" class="chart-empty" description="今日暂无准入统计" />
+        </div>
+      </Card>
+    </div>
 
-    <!-- Leaderboard (Management Only) -->
-    <Row :gutter="16" v-if="isManagement">
-      <Col :span="24">
-        <Card title="团队销售风云榜" :bordered="false">
-          <Table :columns="leaderboardColumns" :data-source="data.leaderboard" :pagination="false" size="small">
-            <template #bodyCell="{ column, record, index }">
-               <template v-if="column.dataIndex === 'rank'">
-                  <Tag :color="index < 3 ? 'red' : 'default'">{{ record.rank }}</Tag>
-               </template>
-            </template>
-          </Table>
-        </Card>
-      </Col>
-    </Row>
-  </div>
-  <div v-else class="p-4" v-loading="loading">
-     <Empty description="数据加载中..." />
+    <Card title="业务员客户分配统计" :bordered="false" :loading="loading" size="small" class="assignment-card">
+      <Table
+        :columns="assignmentColumns"
+        :data-source="assignmentRows"
+        :pagination="{ pageSize: 10, showSizeChanger: false, size: 'small' }"
+        row-key="userId"
+        size="small"
+      >
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.dataIndex === 'starManualCount'">
+            <Tag v-if="record.starManualCount > 0" color="gold">☆ {{ record.starManualCount }}</Tag>
+            <span v-else>0</span>
+          </template>
+        </template>
+        <template #emptyText>
+          <Empty description="暂无分配数据" />
+        </template>
+      </Table>
+    </Card>
   </div>
 </template>
 
 <style scoped>
-.trend-range {
+.dashboard-page {
+  display: grid;
+  gap: 8px;
+  grid-template-rows: auto minmax(300px, 52%) minmax(260px, 1fr);
+  height: calc(100vh - 92px);
+  min-height: 660px;
+  overflow: hidden;
+  padding: 8px 12px;
+}
+
+.filter-card :deep(.ant-card-body) {
+  padding: 8px 12px;
+}
+
+.channel-select {
+  width: 180px;
+}
+
+.chart-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  min-height: 0;
+}
+
+.chart-card {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
 }
 
-.trend-range-item {
-  border: 1px solid #e5e7eb;
-  border-radius: 999px;
-  padding: 2px 10px;
-  font-size: 12px;
-  color: #475569;
-  background: #fff;
-  transition: all 0.2s ease;
+.chart-grid :deep(.ant-card-head) {
+  min-height: 32px;
+  padding: 0 12px;
 }
 
-.trend-range-item:hover {
-  border-color: #94a3b8;
-  color: #1f2937;
+.chart-grid :deep(.ant-card-head-title) {
+  padding: 6px 0;
 }
 
-.trend-range-item.active {
-  border-color: #3b82f6;
-  color: #1d4ed8;
-  background: rgba(59, 130, 246, 0.12);
-  font-weight: 600;
+.chart-grid :deep(.ant-card-body) {
+  flex: 1;
+  padding: 6px 8px;
+  min-height: 0;
 }
 
-:global(.dark) .trend-range-item,
-:global([data-theme='dark']) .trend-range-item {
-  border-color: #334155;
-  background: #0f172a;
-  color: #cbd5f5;
+.chart {
+  height: 100%;
+  min-height: 120px;
 }
 
-:global(.dark) .trend-range-item.active,
-:global([data-theme='dark']) .trend-range-item.active {
-  border-color: #60a5fa;
-  color: #bfdbfe;
-  background: rgba(59, 130, 246, 0.2);
+.chart-box {
+  height: 100%;
+  min-height: 0;
+  position: relative;
+}
+
+.chart.hidden {
+  visibility: hidden;
+}
+
+.chart-empty {
+  left: 50%;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.assignment-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.assignment-card :deep(.ant-card-head) {
+  min-height: 32px;
+  padding: 0 12px;
+}
+
+.assignment-card :deep(.ant-card-head-title) {
+  padding: 6px 0;
+}
+
+.assignment-card :deep(.ant-card-body) {
+  flex: 1;
+  min-height: 0;
+  padding: 4px 8px 8px;
 }
 </style>

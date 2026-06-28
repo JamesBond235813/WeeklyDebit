@@ -33,19 +33,20 @@ public class AreaDataSeedRunner implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) throws Exception {
-        seedMobilePrefixAreaIfEmpty();
+        seedMobilePrefixAreaIfIncomplete();
         seedIdCardAreaIfEmpty();
+        ensureHubeiDirectAdminCities();
     }
 
-    private void seedMobilePrefixAreaIfEmpty() throws Exception {
-        Long count = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM mobile_prefix_area", Long.class);
-        if (count != null && count > 0) {
-            return;
-        }
-
+    private void seedMobilePrefixAreaIfIncomplete() throws Exception {
         ClassPathResource resource = new ClassPathResource(MOBILE_PRE_RESOURCE);
         if (!resource.exists()) {
             log.warn("mobile prefix seed file not found: {}", MOBILE_PRE_RESOURCE);
+            return;
+        }
+        int seedRows = countSeedRows(resource);
+        Long count = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM mobile_prefix_area", Long.class);
+        if (count != null && count >= seedRows) {
             return;
         }
 
@@ -94,6 +95,18 @@ public class AreaDataSeedRunner implements ApplicationRunner {
         log.info("seeded mobile prefix area, count={}", imported);
     }
 
+    private int countSeedRows(ClassPathResource resource) throws Exception {
+        int rows = 0;
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(resource.getInputStream(), StandardCharsets.UTF_8))) {
+            reader.readLine();
+            while (reader.readLine() != null) {
+                rows++;
+            }
+        }
+        return rows;
+    }
+
     private void seedIdCardAreaIfEmpty() throws Exception {
         Long count = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM id_card_area", Long.class);
         if (count != null && count > 0) {
@@ -134,6 +147,34 @@ public class AreaDataSeedRunner implements ApplicationRunner {
             imported += batch.size();
         }
         log.info("seeded id card area, count={}", imported);
+    }
+
+    private void ensureHubeiDirectAdminCities() {
+        Long hubeiId = jdbcTemplate.query("""
+                        SELECT id FROM region_area
+                        WHERE code = '420000' OR name = '湖北省'
+                        ORDER BY CASE WHEN code = '420000' THEN 0 ELSE 1 END
+                        LIMIT 1
+                        """,
+                rs -> rs.next() ? rs.getLong("id") : null);
+        if (hubeiId == null) {
+            return;
+        }
+
+        String sql = """
+                INSERT INTO region_area (parent_id, name, level, code)
+                VALUES (?, ?, 2, ?)
+                ON DUPLICATE KEY UPDATE
+                    parent_id = VALUES(parent_id),
+                    name = VALUES(name),
+                    level = VALUES(level)
+                """;
+        jdbcTemplate.batchUpdate(sql, List.of(
+                new Object[]{hubeiId, "仙桃市", "429004"},
+                new Object[]{hubeiId, "潜江市", "429005"},
+                new Object[]{hubeiId, "天门市", "429006"},
+                new Object[]{hubeiId, "神农架林区", "429021"}
+        ));
     }
 
     private List<String> parseCsvLine(String line) {

@@ -13,6 +13,7 @@ import { customerApi } from '#/api/biz/customer';
 
 const deptNameOptionsRef = ref<{ label: string; value: number }[]>([]);
 const dataChannelOptionsRef = ref<{ label: string; value: number }[]>([]);
+const canSelectDeptRef = ref(false);
 let customerId: number;
 const DATA_TIME_FMT = 'YYYY-MM-DD HH:mm:ss';
 let callbackFunc: () => void;
@@ -44,11 +45,11 @@ const [EditCustModal, editCustModalApi] = useVbenModal({
           return;
         }
         editCustInfoFormApi.getValues().then((values) => {
-          const params: UpdCustomerInfoParams = {
+          const params = {
             ...values,
             id: customerId,
             applyDateStr: values.applyDate?.format(DATA_TIME_FMT),
-          };
+          } as UpdCustomerInfoParams;
           const promise = customerId
             ? customerApi.updCustomerInfo(params)
             : customerApi.addCustomerInfo(params);
@@ -74,13 +75,36 @@ const [EditCustModal, editCustModalApi] = useVbenModal({
     const outData = editCustModalApi.getData<Record<string, any>>();
     customerId = outData.cid;
     callbackFunc = outData.callbackFunc;
+    canSelectDeptRef.value = Boolean(outData.canSelectDept);
     editCustModalApi.setState({
       title: customerId ? '编辑客户信息' : '新增客户信息',
     });
     deptNameOptionsRef.value = outData.deptNameOptions.value;
     dataChannelOptionsRef.value = outData.dataChannelOptions.value;
+    editCustInfoFormApi.updateSchema([
+      {
+        fieldName: 'ownerDeptId',
+        componentProps: {
+          allowClear: true,
+          disabled: !canSelectDeptRef.value,
+          filterOption: (inputValue: string, option: { label: string }) => {
+            return option.label
+              .toLowerCase()
+              .includes(inputValue.toLowerCase());
+          },
+          options: deptNameOptionsRef,
+          placeholder: canSelectDeptRef.value
+            ? '将数据分配至指定部门的公海'
+            : '系统将按当前用户所属部门写入',
+          showSearch: true,
+        },
+      },
+    ]);
     // 若为编辑，则去服务端拉详情数据
     if (!customerId) {
+      editCustInfoFormApi.setValues({
+        ownerDeptId: undefined,
+      });
       return;
     }
     editCustModalApi.setState({ loading: true });

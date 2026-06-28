@@ -1,0 +1,46 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: hyy-collision-mysql
+    restart: unless-stopped
+    command:
+      - --character-set-server=ascii
+      - --collation-server=ascii_bin
+      - --local-infile=1
+      - --innodb-buffer-pool-size=3G
+      - --max-connections=80
+      - --skip-log-bin
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: hyy_collision
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - /data/hyy-collision/mysql:/var/lib/mysql
+      - /data/hyy-collision/import:/import
+      - ./schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+    ports:
+      - "127.0.0.1:3366:3306"
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  api:
+    build: .
+    container_name: hyy-collision-api
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: hyy_collision
+      DB_USER: ${MYSQL_USER}
+      DB_PASSWORD: ${MYSQL_PASSWORD}
+      ACCESS_TOKEN: ${ACCESS_TOKEN}
+      POOL_SIZE: 8
+    ports:
+      - "18080:8080"

@@ -83,4 +83,12 @@ public class PushCustInfoItem {
     /** 保单情况（可选，仅限：未知/有/无，默认未知） */
     @Schema(description = "保单情况（可选，仅限：未知/有/无，默认未知）")
     private String insuranceFlagDescription;
+
+    /** 上游芝麻分档位。HYY: 1=600以下, 2=600-650, 3=650-700, 4=700以上 */
+    @Schema(description = "上游芝麻分档位。HYY: 1=600以下, 2=600-650, 3=650-700, 4=700以上")
+    private Integer upstreamZhimaCode;
+
+    /** 用户来源。HYY 推送中的 channel_id，原样入库展示。 */
+    @Schema(description = "用户来源。HYY 推送中的 channel_id，原样入库展示")
+    private String userSource;
 }

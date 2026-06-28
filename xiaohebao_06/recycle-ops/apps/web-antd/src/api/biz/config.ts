@@ -6,6 +6,8 @@ export type BizDictType =
   | 'CALL_RESULT_TIPS'
   | 'DATA_CHANNEL'
   | 'CUSTOMER_LIST_FIELD'
+  | 'CUSTOMER_BLACK_REGION'
+  | 'CUSTOMER_RISK_REGION'
   | 'ZHIMA_SCORE_THRESHOLD';
 
 export interface BizDictItemDto {
@@ -20,6 +22,23 @@ export interface BizDictItemDto {
 
 export interface EnableRecvConfigDto {
   enable: boolean;
+}
+
+export type RiskRegionType = 'BLACK' | 'RISK';
+
+export interface RiskRegionItemDto {
+  id: number;
+  regionType: RiskRegionType;
+  province: string;
+  city: string;
+  gmtCreate?: string;
+}
+
+export interface RegionItemDto {
+  id: number;
+  name: string;
+  level: number;
+  leaf: boolean;
 }
 
 export const bizConfigApi = {
@@ -41,5 +60,24 @@ export const bizConfigApi = {
   updateEnableRecv: async (config: EnableRecvConfigDto) => {
     return requestClient.post('/sys/biz-cnf/upd-enable-recv', config);
   },
-
+  listRiskRegions: async (regionType: RiskRegionType) => {
+    return requestClient.get<RiskRegionItemDto[]>(
+      `/sys/risk-region/list?regionType=${regionType}`,
+    );
+  },
+  addRiskRegion: async (item: {
+    city: string;
+    province: string;
+    regionType: RiskRegionType;
+  }) => {
+    return requestClient.post('/sys/risk-region/add', item);
+  },
+  deleteRiskRegion: async (id: number) => {
+    return requestClient.post('/sys/risk-region/delete', { id });
+  },
+  listRegionChildren: async (parentId = 0) => {
+    return requestClient.get<RegionItemDto[]>(
+      `/region/children?parentId=${parentId}`,
+    );
+  },
 };

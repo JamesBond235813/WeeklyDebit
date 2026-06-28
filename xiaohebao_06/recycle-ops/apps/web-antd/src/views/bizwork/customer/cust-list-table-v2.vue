@@ -32,7 +32,7 @@ import { useVbenModal } from '@vben/common-ui';
 import { AdQuestion } from '@vben/icons';
 import { useUserStore } from '@vben/stores';
 
-import { Button, message, Modal, Table, Tooltip } from 'ant-design-vue';
+import { Button, message, Modal, Table, Tag, Tooltip } from 'ant-design-vue';
 
 import { useVbenForm } from '#/adapter/form';
 import {
@@ -41,7 +41,10 @@ import {
   HIGHT_LIGHT_PROGRESS_VALUES,
 } from '#/api/biz/customer';
 import { deptApi } from '#/api/biz/dept';
+import { regionApi, type RegionItem } from '#/api/biz/region';
+import { getRadarReport, getRiskReport } from '#/api/biz/risk';
 import { userApi } from '#/api/biz/user';
+import RiskReportDialog from '#/views/dashboard/risk/risk-report-dialog.vue';
 
 import ExtraModal from './cust-form.vue';
 import DispatchCustModal from './dispatch-cust-modal.vue';
@@ -80,6 +83,7 @@ const hasMaintainRole = access.hasAccessByRoles([
   'ROLE_SUPPER',
   'ROLE_DEPT_DATA_ADMIN',
 ]);
+const isObserverRole = access.hasAccessByRoles(['ROLE_OBSERVER']);
 // 是否隐藏管理员使用的搜索条件
 const hideAdminSearchCondition: ComputedRef<boolean> = computed(() => {
   return !hasMaintainRole || props.favoriteFlag !== null || props.selfOnly;
@@ -91,6 +95,10 @@ const progressOptions = ref<{ label: string; value: number }[]>([]);
 const deptNameOptions = ref<{ label: string; value: number }[]>([]);
 const userNameOptions = ref<{ label: string; value: number }[]>([]);
 const channelOptions = ref<{ label: string; value: number }[]>([]);
+const regionProvinceOptions = ref<{ label: string; value: number }[]>([]);
+const regionCityOptions = ref<{ label: string; value: number }[]>([]);
+const regionProvinceMap = new Map<number, string>();
+const regionCityMap = new Map<number, string>();
 const zhimaThreshold = ref<null | number>(null);
 const zhimaScoreMinRef = ref<null | number>(null);
 // deptUserMap用于与部门筛选框联动，目前暂先不用
@@ -108,6 +116,11 @@ const pagination = ref<TablePaginationConfig>({});
 const custDescMap: Map<number, string> = new Map<number, string>();
 const custGroupDescList = ref<string[]>([]);
 const visibleFieldKeys = ref<null | Set<string>>(null);
+const riskReportVisible = ref(false);
+const riskReportLoading = ref(false);
+const radarReportLoading = ref(false);
+const currentRiskReport = ref<any>(null);
+const riskReportPanoramaOnly = ref(false);
 const [VbenModal, modalApi] = useVbenModal({
   // 连接抽离的组件
   connectedComponent: ExtraModal,
@@ -143,7 +156,9 @@ async function initOptions() {
 
     const groupDescList: string[] = [];
     customerGroupOptions.value = customerStarGroup.map((e: BizDictItem) => {
-      const description = e.description ? `${e.label}: ${e.description}` : e.label;
+      const description = e.description
+        ? `${e.label}: ${e.description}`
+        : e.label;
       groupDescList.push(description);
       return { label: e.label, value: e.intValue };
     });
@@ -165,6 +180,7 @@ async function initOptions() {
     zhimaThreshold.value =
       typeof thresholdValue === 'number' ? thresholdValue : null;
     await loadFieldConfig();
+    await loadRegionProvinceOptions();
     initSchemaList();
     setupColumns();
 
@@ -193,6 +209,39 @@ async function initOptions() {
   }
 }
 
+async function loadRegionProvinceOptions() {
+  try {
+    const provinces = await regionApi.listChildren(0);
+    regionProvinceMap.clear();
+    regionProvinceOptions.value = (provinces || []).map((item: RegionItem) => {
+      regionProvinceMap.set(item.id, item.name);
+      return { label: item.name, value: item.id };
+    });
+  } catch {
+    regionProvinceOptions.value = [];
+  }
+}
+
+async function handleRegionProvinceChange(provinceId?: number) {
+  regionCityMap.clear();
+  regionCityOptions.value = [];
+  await searchFormApi.setValues({ regionCityId: undefined });
+  if (!provinceId) {
+    initSchemaList();
+    return;
+  }
+  try {
+    const cities = await regionApi.listChildren(provinceId);
+    regionCityOptions.value = (cities || []).map((item: RegionItem) => {
+      regionCityMap.set(item.id, item.name);
+      return { label: item.name, value: item.id };
+    });
+  } catch {
+    regionCityOptions.value = [];
+  }
+  initSchemaList();
+}
+
 async function loadFieldConfig() {
   try {
     const list = await customerApi.getCustomerFieldConfig();
@@ -207,9 +256,6 @@ async function loadFieldConfig() {
 
 function isFieldVisible(fieldKey: string) {
   if (!fieldKey) {
-    return true;
-  }
-  if (fieldKey === 'zhimaScore') {
     return true;
   }
   if (visibleFieldKeys.value === null) {
@@ -232,6 +278,18 @@ function getZhimaScoreClass(score?: null | number) {
   return isZhimaScoreHigh(score) ? 'zhima-score-highlight' : '';
 }
 
+function displayText(value?: null | number | string) {
+  return value === 0 || value ? String(value) : '';
+}
+
+function displayZhima(record: CustomerItem) {
+  return record.hyyZhimaDesc || displayText(record.zhimaScore);
+}
+
+function displayLoanAmount(record: CustomerItem) {
+  return record.hyyLoanAmountDesc || displayText(record.reqLoanAmount);
+}
+
 const searchFieldKeyMap: Record<string, string> = {
   followTimePicker: 'followTime',
   applyDatePicker: 'applyDate',
@@ -243,6 +301,8 @@ const searchFieldKeyMap: Record<string, string> = {
   ownerDeptIds: 'ownerDeptName',
   userIdList: 'ownerUserName',
   zhimaScoreMin: 'zhimaScore',
+  regionProvinceId: 'mobileArea',
+  regionCityId: 'mobileArea',
 };
 
 function isSearchFieldVisible(fieldName: string) {
@@ -306,6 +366,22 @@ function initSchemaList() {
       },
     });
   }
+  if (props.publicPoolOnly) {
+    schemaList.push({
+      component: 'Select',
+      fieldName: 'publicPoolStarFlag',
+      label: '是否☆',
+      componentProps: {
+        placeholder: '不限',
+        allowClear: true,
+        options: [
+          { label: '☆', value: 1 },
+          { label: '☆☆', value: 2 },
+          { label: '其他', value: 0 },
+        ],
+      },
+    });
+  }
   if (isSearchFieldVisible('customerGroup')) {
     schemaList.push({
       component: 'Select',
@@ -344,13 +420,36 @@ function initSchemaList() {
     });
   }
   schemaList.push({
-    component: 'Input',
-    fieldName: 'ignoreDays',
-    label: '未跟进 >=',
+    component: 'Select',
+    fieldName: 'regionProvinceId',
+    label: '地区省份',
     componentProps: {
-      placeholder: '不限',
+      placeholder: '不限省份',
+      allowClear: true,
+      showSearch: true,
+      options: regionProvinceOptions.value,
+      filterOption: (inputValue: string, option: { label: string }) => {
+        return option.label.toLowerCase().includes(inputValue.toLowerCase());
+      },
+      onChange: (value?: number) => {
+        void handleRegionProvinceChange(value);
+      },
     },
-    suffix: '天',
+  });
+  schemaList.push({
+    component: 'Select',
+    fieldName: 'regionCityId',
+    label: '地区城市',
+    componentProps: {
+      placeholder: '不限城市',
+      allowClear: true,
+      showSearch: true,
+      disabled: regionCityOptions.value.length === 0,
+      options: regionCityOptions.value,
+      filterOption: (inputValue: string, option: { label: string }) => {
+        return option.label.toLowerCase().includes(inputValue.toLowerCase());
+      },
+    },
   });
   if (isSearchFieldVisible('zhimaScoreMin')) {
     schemaList.push({
@@ -401,7 +500,7 @@ function initSchemaList() {
       },
     });
   }
-  if (!hideAdminSearchCondition.value) {
+  if (!hideAdminSearchCondition.value && !props.publicPoolOnly) {
     schemaList.push({
       component: 'Select',
       fieldName: 'ownerFavorite',
@@ -496,6 +595,14 @@ async function pagedListCustomerInfo(formValues?: any) {
     const channelValue = formValues?.channel;
     const callTipsValue = formValues?.callTips;
     const zhimaValue = formValues?.zhimaScoreMin ?? zhimaScoreMinRef.value;
+    const regionProvince =
+      typeof formValues?.regionProvinceId === 'number'
+        ? regionProvinceMap.get(formValues.regionProvinceId)
+        : undefined;
+    const regionCity =
+      typeof formValues?.regionCityId === 'number'
+        ? regionCityMap.get(formValues.regionCityId)
+        : undefined;
     const progressList =
       Array.isArray(progressValue) && progressValue.length > 0
         ? progressValue
@@ -523,6 +630,8 @@ async function pagedListCustomerInfo(formValues?: any) {
     if (Array.isArray(channelValue)) {
       delete cleanedValues.channel;
     }
+    delete cleanedValues.regionProvinceId;
+    delete cleanedValues.regionCityId;
     const data: PagedInfo<CustomerItem> =
       await customerApi.pagedListCustomerInfo({
         ...cleanedValues,
@@ -552,6 +661,8 @@ async function pagedListCustomerInfo(formValues?: any) {
             : undefined,
         selfOnly: props.selfOnly || props.favoriteFlag !== null,
         publicPoolOnly: props.publicPoolOnly,
+        regionProvince,
+        regionCity,
         orderByFollowTimeDesc,
         orderByApplyDateDesc,
         page: formValues?.page ?? 1,
@@ -597,7 +708,7 @@ async function pagedListCustomerInfo(formValues?: any) {
 const columns = ref<TableColumnType<CustomerItem>[]>([]);
 const draggingColumnKey = ref<null | string>(null);
 const dragOverColumnKey = ref<null | string>(null);
-const columnOrderStorageKey = 'cust-list-table-column-order';
+const columnOrderStorageKey = 'cust-list-table-column-order-v3';
 
 function setupColumns() {
   columns.value = [];
@@ -628,20 +739,40 @@ function setupColumns() {
       className: 'cell-nowrap',
     });
   }
-  if (isFieldVisible('sexDesc')) {
+  if (isFieldVisible('userSource')) {
     columns.value.push({
-      title: '性别',
-      dataIndex: 'sexDesc',
-      key: 'sexDesc',
-      width: 60,
+      title: '用户来源',
+      dataIndex: 'userSource',
+      key: 'userSource',
+      width: 130,
+      ellipsis: true,
+      className: 'cell-nowrap',
     });
   }
-  if (isFieldVisible('customerGroupDesc')) {
+  if (isFieldVisible('channelDesc')) {
     columns.value.push({
-      title: '客户星级',
-      dataIndex: 'customerGroupDesc',
-      width: 120,
-      key: 'customerGroupDesc',
+      title: '上游渠道',
+      dataIndex: 'channelDesc',
+      key: 'channelDesc',
+      width: 130,
+      ellipsis: true,
+      className: 'cell-nowrap',
+    });
+  }
+  if (isFieldVisible('hyyOverdueDesc')) {
+    columns.value.push({
+      title: '逾期情况',
+      dataIndex: 'hyyOverdueDesc',
+      key: 'hyyOverdueDesc',
+      width: 100,
+    });
+  }
+  if (isFieldVisible('reqLoanAmount')) {
+    columns.value.push({
+      title: '需要金额',
+      dataIndex: 'reqLoanAmount',
+      key: 'reqLoanAmount',
+      width: 100,
     });
   }
   if (isFieldVisible('progressDesc')) {
@@ -650,6 +781,62 @@ function setupColumns() {
       dataIndex: 'progressDesc',
       width: 100,
       key: 'progressDesc',
+    });
+  }
+  if (isFieldVisible('hyySocialInsuranceDesc')) {
+    columns.value.push({
+      title: '社保',
+      dataIndex: 'hyySocialInsuranceDesc',
+      key: 'hyySocialInsuranceDesc',
+      width: 110,
+    });
+  }
+  if (isFieldVisible('zhimaScore')) {
+    columns.value.push({
+      title: '芝麻分',
+      dataIndex: 'zhimaScore',
+      key: 'zhimaScore',
+      width: 90,
+    });
+  }
+  if (isFieldVisible('hyyProvidentDesc')) {
+    columns.value.push({
+      title: '公积金',
+      dataIndex: 'hyyProvidentDesc',
+      key: 'hyyProvidentDesc',
+      width: 110,
+    });
+  }
+  if (isFieldVisible('hyyHouseDesc')) {
+    columns.value.push({
+      title: '房',
+      dataIndex: 'hyyHouseDesc',
+      key: 'hyyHouseDesc',
+      width: 80,
+    });
+  }
+  if (isFieldVisible('hyyCarDesc')) {
+    columns.value.push({
+      title: '车',
+      dataIndex: 'hyyCarDesc',
+      key: 'hyyCarDesc',
+      width: 160,
+    });
+  }
+  if (isFieldVisible('hyyOccupationDesc')) {
+    columns.value.push({
+      title: '职业',
+      dataIndex: 'hyyOccupationDesc',
+      key: 'hyyOccupationDesc',
+      width: 100,
+    });
+  }
+  if (isFieldVisible('sexDesc')) {
+    columns.value.push({
+      title: '性别',
+      dataIndex: 'sexDesc',
+      key: 'sexDesc',
+      width: 60,
     });
   }
   if (isFieldVisible('customerRemark')) {
@@ -684,20 +871,20 @@ function setupColumns() {
       width: 60,
     });
   }
-  if (isFieldVisible('reqLoanAmount')) {
+  if (isFieldVisible('hyyInsuranceDesc')) {
     columns.value.push({
-      title: '需要金额',
-      dataIndex: 'reqLoanAmount',
-      key: 'reqLoanAmount',
-      width: 100,
+      title: '投保',
+      dataIndex: 'hyyInsuranceDesc',
+      key: 'hyyInsuranceDesc',
+      width: 110,
     });
   }
-  if (isFieldVisible('zhimaScore')) {
+  if (isFieldVisible('hyyIp')) {
     columns.value.push({
-      title: '芝麻分',
-      dataIndex: 'zhimaScore',
-      key: 'zhimaScore',
-      width: 80,
+      title: 'IP地址',
+      dataIndex: 'hyyIp',
+      key: 'hyyIp',
+      width: 130,
     });
   }
   if (hasMaintainRole && isFieldVisible('ownerUserName')) {
@@ -706,14 +893,6 @@ function setupColumns() {
       dataIndex: 'ownerUserName',
       key: 'ownerUserName',
       width: 100,
-    });
-  }
-  if (isFieldVisible('applyDate')) {
-    columns.value.push({
-      title: '申请时间',
-      dataIndex: 'applyDate',
-      key: 'applyDate',
-      width: 180,
     });
   }
   if (isFieldVisible('followerUserName')) {
@@ -732,20 +911,30 @@ function setupColumns() {
       width: 100,
     });
   }
-  if (isFieldVisible('followRemark')) {
+  if (isFieldVisible('applyDate')) {
     columns.value.push({
-      title: '跟进情况备注',
-      dataIndex: 'followRemark',
-      key: 'followRemark',
-      width: 200,
+      title: '申请时间',
+      dataIndex: 'applyDate',
+      key: 'applyDate',
+      width: 180,
     });
   }
-  if (isFieldVisible('ownerDeptName')) {
+  if (isFieldVisible('radarReport')) {
     columns.value.push({
-      title: '数据归属部门',
-      dataIndex: 'ownerDeptName',
-      key: 'ownerDeptName',
-      width: 120,
+      title: '雷达查询',
+      dataIndex: 'radarReport',
+      key: 'radarReport',
+      width: 100,
+      align: 'center',
+    });
+  }
+  if (isFieldVisible('riskReport')) {
+    columns.value.push({
+      title: '风控报告',
+      dataIndex: 'riskReport',
+      key: 'riskReport',
+      width: 100,
+      align: 'center',
     });
   }
   columns.value.push({
@@ -993,6 +1182,15 @@ const state = reactive<{
 const onSelectChange = (selectedRowKeys: number[]) => {
   state.selectedRowKeys = selectedRowKeys;
 };
+const rowSelection = computed(() => {
+  if (isObserverRole) {
+    return undefined;
+  }
+  return {
+    selectedRowKeys: state.selectedRowKeys,
+    onChange: onSelectChange,
+  };
+});
 const handleTableChange: TableProps['onChange'] = async (pag) => {
   pagination.value = {
     ...pagination.value,
@@ -1127,6 +1325,54 @@ async function claimCustomer(cid: number) {
   await pagedListCustomerInfo(formValues);
 }
 
+const normalizeRiskResponse = (res: any) => res?.data ?? res;
+
+async function openRiskReport(record: CustomerItem) {
+  if (!record?.name && !record?.idCardNo && !record?.mobile) {
+    message.warning('客户三要素信息不足，无法查询风控报告');
+    return;
+  }
+  riskReportLoading.value = true;
+  try {
+    riskReportPanoramaOnly.value = false;
+    currentRiskReport.value = normalizeRiskResponse(
+      await getRiskReport({
+        name: record.name?.trim(),
+        idCard: record.idCardNo?.trim(),
+        phone: record.mobile?.trim(),
+      }),
+    );
+    riskReportVisible.value = true;
+  } catch (error: any) {
+    message.error(error?.message || '获取风控报告失败');
+  } finally {
+    riskReportLoading.value = false;
+  }
+}
+
+async function openRadarReport(record: CustomerItem) {
+  if (!record?.name && !record?.idCardNo && !record?.mobile) {
+    message.warning('客户三要素信息不足，无法查询全景雷达报告');
+    return;
+  }
+  radarReportLoading.value = true;
+  try {
+    riskReportPanoramaOnly.value = true;
+    currentRiskReport.value = normalizeRiskResponse(
+      await getRadarReport({
+        name: record.name?.trim(),
+        idCard: record.idCardNo?.trim(),
+        phone: record.mobile?.trim(),
+      }),
+    );
+    riskReportVisible.value = true;
+  } catch (error: any) {
+    message.error(error?.message || '获取全景雷达报告失败');
+  } finally {
+    radarReportLoading.value = false;
+  }
+}
+
 /**
  * 根据favFlag将客户信息移动到不同的菜单列表
  * @param cids
@@ -1165,12 +1411,17 @@ function batchBackToOcean() {
 </script>
 <template>
   <VbenModal />
+  <RiskReportDialog
+    v-model:open="riskReportVisible"
+    :panorama-only="riskReportPanoramaOnly"
+    :report="currentRiskReport"
+  />
   <div
     class="cust-search-panel w-full rounded-lg border border-gray-200 bg-white p-2 pb-1 shadow-sm transition-colors duration-200 dark:border-[#1f2a44] dark:bg-[#0f172a] dark:text-[#c7d2fe]"
   >
     <SearchForm />
   </div>
-  <div class="m-1 mt-5 w-full">
+  <div v-if="!isObserverRole" class="m-1 mt-5 w-full">
     <span class="mr-1">批量操作:</span>
     <Button
       size="small"
@@ -1255,10 +1506,7 @@ function batchBackToOcean() {
       :pagination="pagination"
       size="small"
       :scroll="{ x: 220, y: viewportHeight }"
-      :row-selection="{
-        selectedRowKeys: state.selectedRowKeys,
-        onChange: onSelectChange,
-      }"
+      :row-selection="rowSelection"
       @change="handleTableChange"
       bordered
     >
@@ -1308,6 +1556,27 @@ function batchBackToOcean() {
         </div>
       </template>
       <template #bodyCell="{ column, record }">
+        <template v-if="column.key === 'name'">
+          <span class="customer-name-cell">
+            <span>{{ record.name }}</span>
+            <span
+              v-if="publicPoolOnly && record.publicPoolStarFlag > 0"
+              class="public-pool-star"
+            >
+              {{ record.publicPoolStarFlag === 2 ? '☆☆' : '☆' }}
+            </span>
+            <Tag v-if="record.riskRegionHit" color="red" class="region-hit-tag">
+              风
+            </Tag>
+            <Tag
+              v-if="record.blackRegionHit"
+              color="black"
+              class="region-hit-tag"
+            >
+              黑
+            </Tag>
+          </span>
+        </template>
         <template
           v-if="
             column.key === 'progressDesc' &&
@@ -1318,8 +1587,31 @@ function batchBackToOcean() {
         </template>
         <template v-if="column.key === 'zhimaScore'">
           <span :class="getZhimaScoreClass(record.zhimaScore)">
-            {{ record.zhimaScore ?? '' }}
+            {{ displayZhima(record) }}
           </span>
+        </template>
+        <template v-if="column.key === 'reqLoanAmount'">
+          {{ displayLoanAmount(record) }}
+        </template>
+        <template v-if="column.key === 'riskReport'">
+          <Button
+            size="small"
+            type="link"
+            :loading="riskReportLoading"
+            @click="openRiskReport(record)"
+          >
+            查看
+          </Button>
+        </template>
+        <template v-if="column.key === 'radarReport'">
+          <Button
+            size="small"
+            type="link"
+            :loading="radarReportLoading"
+            @click="openRadarReport(record)"
+          >
+            查询
+          </Button>
         </template>
         <template v-if="column.key === 'action'">
           <Button
@@ -1343,7 +1635,7 @@ function batchBackToOcean() {
             size="small"
             type="link"
             class="-m-1 p-2"
-            v-if="publicPoolOnly && record.ownerUserId === 0"
+            v-if="!isObserverRole && publicPoolOnly && record.ownerUserId === 0"
             @click="claimCustomer(record.id)"
           >
             领取
@@ -1550,6 +1842,26 @@ function batchBackToOcean() {
 
 .cust-list-table :deep(.cell-nowrap) {
   white-space: nowrap;
+}
+
+.customer-name-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.region-hit-tag {
+  margin-inline-end: 0;
+  padding-inline: 4px;
+  line-height: 18px;
+}
+
+.public-pool-star {
+  color: #c47f00;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .zhima-score-highlight {

@@ -21,6 +21,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -179,9 +180,8 @@ public class BizConfigServiceImpl implements BizConfigService {
         LambdaQueryWrapper<BizDictConfigDO> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(BizDictConfigDO::getBizType, configTypeEnum.name());
         List<BizDictConfigDO> existing = bizDictConfigManager.list(wrapper);
-        Set<String> existingKeys = existing.stream()
-                .map(BizDictConfigDO::getDescription)
-                .filter(StringUtils::isNotBlank)
+        Set<String> knownKeys = Arrays.stream(CustomerListFieldEnum.values())
+                .map(CustomerListFieldEnum::getFieldKey)
                 .collect(Collectors.toSet());
         Set<Integer> usedValues = existing.stream()
                 .map(BizDictConfigDO::getIntValue)
@@ -189,8 +189,18 @@ public class BizConfigServiceImpl implements BizConfigService {
                 .collect(Collectors.toSet());
         int nextValue = usedValues.stream().max(Integer::compareTo).orElse(0) + 1;
         List<BizDictConfigDO> toInsert = new ArrayList<>();
+        List<BizDictConfigDO> toUpdate = new ArrayList<>();
         for (CustomerListFieldEnum field : CustomerListFieldEnum.values()) {
-            if (existingKeys.contains(field.getFieldKey())) {
+            BizDictConfigDO existingConfig = existing.stream()
+                    .filter(e -> StringUtils.equals(e.getDescription(), field.getFieldKey()))
+                    .findFirst()
+                    .orElse(null);
+            if (existingConfig != null) {
+                toUpdate.add(new BizDictConfigDO()
+                        .setId(existingConfig.getId())
+                        .setIntValue(field.getSortNo())
+                        .setLabel(field.getLabel())
+                        .setOptUserId(0L));
                 continue;
             }
             int value = field.getSortNo();
@@ -208,9 +218,67 @@ public class BizConfigServiceImpl implements BizConfigService {
                     .setOptUserId(0L);
             toInsert.add(configDO);
         }
+        if (!toUpdate.isEmpty()) {
+            List<BizDictConfigDO> tempUpdates = new ArrayList<>();
+            for (int i = 0; i < existing.size(); i++) {
+                BizDictConfigDO item = existing.get(i);
+                if (item.getId() == null) {
+                    continue;
+                }
+                tempUpdates.add(new BizDictConfigDO()
+                        .setId(item.getId())
+                        .setIntValue(-100000 - i)
+                        .setOptUserId(0L));
+            }
+            if (!tempUpdates.isEmpty()) {
+                bizDictConfigManager.updateBatchById(tempUpdates);
+            }
+            bizDictConfigManager.updateBatchById(toUpdate);
+            List<BizDictConfigDO> obsoleteUpdates = new ArrayList<>();
+            int obsoleteSortNo = 1000;
+            for (BizDictConfigDO item : existing) {
+                if (item.getId() == null || knownKeys.contains(item.getDescription())) {
+                    continue;
+                }
+                obsoleteUpdates.add(new BizDictConfigDO()
+                        .setId(item.getId())
+                        .setIntValue(obsoleteSortNo++)
+                        .setStatus(CommonStatusEnum.FORBIDDEN.status)
+                        .setOptUserId(0L));
+            }
+            if (!obsoleteUpdates.isEmpty()) {
+                bizDictConfigManager.updateBatchById(obsoleteUpdates);
+            }
+        }
         if (!toInsert.isEmpty()) {
+            avoidCustomerListFieldValueConflicts(configTypeEnum, toInsert);
             bizDictConfigManager.saveBatch(toInsert);
+            ensureCustomerListFieldConfigsIfNeeded(configTypeEnum);
+            return;
+        }
+        if (!toInsert.isEmpty() || !toUpdate.isEmpty()) {
             bizDictConfigManager.clearCache(configTypeEnum);
+        }
+    }
+
+    private void avoidCustomerListFieldValueConflicts(BizDictConfigTypeEnum configTypeEnum, List<BizDictConfigDO> toInsert) {
+        LambdaQueryWrapper<BizDictConfigDO> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(BizDictConfigDO::getBizType, configTypeEnum.name());
+        Set<Integer> occupiedValues = bizDictConfigManager.list(wrapper).stream()
+                .map(BizDictConfigDO::getIntValue)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        int nextValue = occupiedValues.stream().max(Integer::compareTo).orElse(0) + 1;
+        for (BizDictConfigDO item : toInsert) {
+            Integer value = item.getIntValue();
+            if (value == null) {
+                value = nextValue++;
+            }
+            while (occupiedValues.contains(value)) {
+                value = nextValue++;
+            }
+            item.setIntValue(value);
+            occupiedValues.add(value);
         }
     }
 }

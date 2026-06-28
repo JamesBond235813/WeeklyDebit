@@ -19,6 +19,8 @@ public interface CustDispatchService {
 
     void recordManualAssignment(Long userId, Long deptId, int count);
 
+    void recordManualAssignment(Long userId, Long deptId, int count, int starCount);
+
     class DispatchUserResult {
         private final Long userId;
         private final Long deptId;

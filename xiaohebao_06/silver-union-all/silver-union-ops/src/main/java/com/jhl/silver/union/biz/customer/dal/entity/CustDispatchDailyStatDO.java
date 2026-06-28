@@ -43,6 +43,9 @@ public class CustDispatchDailyStatDO implements Serializable {
     @Schema(description = "手动分配数量")
     private Integer manualCount;
 
+    @Schema(description = "领取公海星标客户数量")
+    private Integer starManualCount;
+
     @Schema(description = "创建时间")
     private Date gmtCreate;
 

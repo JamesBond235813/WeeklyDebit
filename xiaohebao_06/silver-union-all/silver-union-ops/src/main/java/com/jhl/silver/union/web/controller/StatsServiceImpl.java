@@ -27,6 +27,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.time.DateFormatUtils;
 import org.apache.commons.lang3.time.DateUtils;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 
@@ -61,6 +62,8 @@ public class StatsServiceImpl implements StatsService {
     private BizConfigService bizConfigService;
     @Resource
     private com.jhl.silver.union.biz.order.service.BizOrderService bizOrderService;
+    @Resource
+    private JdbcTemplate jdbcTemplate;
 
     @Override
     public StatsDashboardVO getDashboardSummary(Long optUserId, Long optUserDeptId, Set<UserAuthRoleEnum> roles) {
@@ -188,6 +191,321 @@ public class StatsServiceImpl implements StatsService {
             }
         }
         return new ArrayList<>(resultMap.values());
+    }
+
+    @Override
+    public ChannelPushTrendVO getChannelPushTrend(int days) {
+        int safeDays = normalizeDays(days);
+        List<String> dates = buildDateLabels(safeDays);
+        LocalDate startDate = LocalDate.parse(dates.get(0));
+        LocalDate endDate = LocalDate.now();
+        return getChannelPushTrend(startDate.toString(), endDate.toString(), null, false);
+    }
+
+    @Override
+    public ChannelPushTrendVO getChannelPushTrend(String startDate, String endDate, String channel,
+            boolean admissionOnly) {
+        LocalDate start = parseDateOrDefault(startDate, LocalDate.now().minusDays(6));
+        LocalDate end = parseDateOrDefault(endDate, LocalDate.now());
+        if (end.isBefore(start)) {
+            LocalDate tmp = start;
+            start = end;
+            end = tmp;
+        }
+        List<String> dates = buildDateLabels(start, end);
+        if (admissionOnly) {
+            return getAdmissionTrend(dates, start, end, channel);
+        }
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
+                SELECT DATE_FORMAT(t.stat_day, '%Y-%m-%d') AS stat_date,
+                       t.channel_name,
+                       t.total
+                FROM (
+                    SELECT DATE(r.gmt_create) AS stat_day,
+                           COALESCE(NULLIF(r.channel_name, ''), '未知渠道') AS channel_name,
+                           COUNT(1) AS total
+                    FROM cust_push_record r
+                    WHERE r.type = 1
+                      AND r.mobile IS NOT NULL
+                      AND r.mobile <> ''
+                      AND COALESCE(r.existed_flag, 0) <> 1
+                      AND r.gmt_create >= ?
+                      AND r.gmt_create < DATE_ADD(?, INTERVAL 1 DAY)
+                      AND (? IS NULL OR COALESCE(NULLIF(r.channel_name, ''), '未知渠道') = ?)
+                      AND EXISTS (
+                          SELECT 1
+                          FROM customer_info_item c
+                          WHERE c.mobile = r.mobile
+                          LIMIT 1
+                      )
+                    GROUP BY DATE(r.gmt_create), COALESCE(NULLIF(r.channel_name, ''), '未知渠道')
+                ) t
+                ORDER BY stat_date ASC, channel_name ASC
+                """, java.sql.Date.valueOf(start), java.sql.Date.valueOf(end), normalizeChannel(channel),
+                normalizeChannel(channel));
+        return buildChannelTrendVo(dates, rows);
+    }
+
+    private ChannelPushTrendVO getAdmissionTrend(List<String> dates, LocalDate start, LocalDate end, String channel) {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
+                SELECT DATE_FORMAT(t.stat_day, '%Y-%m-%d') AS stat_date,
+                       t.channel_name,
+                       t.total
+                FROM (
+                    SELECT stat_date AS stat_day,
+                           COALESCE(NULLIF(channel_name, ''), '未知渠道') AS channel_name,
+                           COUNT(1) AS total
+                    FROM cust_api_admission_stat_event
+                    WHERE admission_passed = 1
+                      AND stat_date >= ?
+                      AND stat_date <= ?
+                      AND (? IS NULL OR COALESCE(NULLIF(channel_name, ''), '未知渠道') = ?)
+                    GROUP BY stat_date, COALESCE(NULLIF(channel_name, ''), '未知渠道')
+                ) t
+                ORDER BY stat_date ASC, channel_name ASC
+                """, java.sql.Date.valueOf(start), java.sql.Date.valueOf(end), normalizeChannel(channel),
+                normalizeChannel(channel));
+        return buildChannelTrendVo(dates, rows);
+    }
+
+    private ChannelPushTrendVO buildChannelTrendVo(List<String> dates, List<Map<String, Object>> rows) {
+        Set<String> channelSet = new TreeSet<>();
+        Map<String, Map<String, Integer>> rowMap = new HashMap<>();
+        for (Map<String, Object> row : rows) {
+            String date = Objects.toString(row.get("stat_date"), "");
+            String channel = Objects.toString(row.get("channel_name"), "未知渠道");
+            int total = toInt(row.get("total"));
+            channelSet.add(channel);
+            rowMap.computeIfAbsent(channel, key -> new HashMap<>()).put(date, total);
+        }
+        List<String> channels = new ArrayList<>(channelSet);
+        Map<String, List<Integer>> series = new LinkedHashMap<>();
+        for (String channel : channels) {
+            Map<String, Integer> values = rowMap.getOrDefault(channel, Map.of());
+            List<Integer> counts = dates.stream()
+                    .map(date -> values.getOrDefault(date, 0))
+                    .collect(Collectors.toList());
+            series.put(channel, counts);
+        }
+        return new ChannelPushTrendVO()
+                .setDates(dates)
+                .setChannels(channels)
+                .setSeries(series);
+    }
+
+    @Override
+    public List<String> getDashboardChannels() {
+        List<String> channels = jdbcTemplate.queryForList("""
+                SELECT channel_name
+                FROM (
+                    SELECT DISTINCT CONVERT(COALESCE(NULLIF(channel_name, ''), '未知渠道') USING utf8mb4)
+                        COLLATE utf8mb4_general_ci AS channel_name
+                    FROM cust_push_record
+                    WHERE type = 1
+                    UNION
+                    SELECT DISTINCT CONVERT(COALESCE(NULLIF(channel_name, ''), '未知渠道') USING utf8mb4)
+                        COLLATE utf8mb4_general_ci AS channel_name
+                    FROM cust_api_admission_stat_event
+                ) t
+                WHERE channel_name IS NOT NULL AND channel_name <> ''
+                ORDER BY channel_name ASC
+                """, String.class);
+        return channels == null ? List.of() : channels;
+    }
+
+    @Override
+    public List<SalesAssignmentStatsItemVO> getSalesAssignmentStats(String startDate, String endDate,
+            Long optUserDeptId, Set<UserAuthRoleEnum> roles) {
+        LocalDate start = parseDateOrDefault(startDate, LocalDate.now().minusDays(6));
+        LocalDate end = parseDateOrDefault(endDate, LocalDate.now());
+        if (end.isBefore(start)) {
+            LocalDate tmp = start;
+            start = end;
+            end = tmp;
+        }
+        boolean isSupper = roles.contains(UserAuthRoleEnum.ROLE_SUPPER);
+        boolean isDeptAdmin = roles.contains(UserAuthRoleEnum.ROLE_DEPT_DATA_ADMIN);
+        Set<Long> allowedDeptIds = getAllowedDeptIds(optUserDeptId, roles);
+        String deptCondition = "";
+        List<Object> params = new ArrayList<>();
+        params.add(java.sql.Date.valueOf(start));
+        params.add(java.sql.Date.valueOf(end));
+        if (!isSupper && isDeptAdmin && !CollectionUtils.isEmpty(allowedDeptIds)) {
+            deptCondition = " AND dept_id IN (" + allowedDeptIds.stream().map(String::valueOf)
+                    .collect(Collectors.joining(",")) + ") ";
+        }
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
+                SELECT user_id, dept_id,
+                       SUM(auto_count) AS auto_count,
+                       SUM(manual_count) AS manual_count,
+                       SUM(COALESCE(star_manual_count, 0)) AS star_manual_count
+                FROM cust_dispatch_daily_stat
+                WHERE stat_date >= ? AND stat_date <= ?
+                """ + deptCondition + """
+                GROUP BY user_id, dept_id
+                ORDER BY SUM(auto_count + manual_count) DESC, user_id ASC
+                """, params.toArray());
+        List<UserItemInfo> users = isSupper
+                ? userService.listUserItemByDeptIds(List.of(), null, false)
+                : userService.listUserItemByDeptIds(new ArrayList<>(allowedDeptIds), null, false);
+        Map<Long, UserItemInfo> userMap = users == null ? Map.of() : users.stream()
+                .filter(user -> user.getId() != null)
+                .collect(Collectors.toMap(UserItemInfo::getId, user -> user, (a, b) -> a));
+        List<SalesAssignmentStatsItemVO> result = new ArrayList<>();
+        for (Map<String, Object> row : rows) {
+            Long userId = toLong(row.get("user_id"));
+            Long deptId = toLong(row.get("dept_id"));
+            int autoCount = toInt(row.get("auto_count"));
+            int manualCount = toInt(row.get("manual_count"));
+            int starManualCount = toInt(row.get("star_manual_count"));
+            UserItemInfo user = userMap.get(userId);
+            result.add(new SalesAssignmentStatsItemVO()
+                    .setUserId(userId)
+                    .setUserName(user != null ? user.getName() : userService.getUserRealName(userId))
+                    .setDeptId(deptId)
+                    .setDeptName(user != null ? user.getDeptName() : deptService.getDeptNameById(deptId))
+                    .setAutoCount(autoCount)
+                    .setManualCount(manualCount)
+                    .setStarManualCount(starManualCount)
+                    .setTotalCount(autoCount + manualCount));
+        }
+        return result;
+    }
+
+    @Override
+    public StarPublicPoolTrendVO getStarPublicPoolTrend(int days) {
+        int safeDays = normalizeDays(days);
+        List<String> dates = buildDateLabels(safeDays);
+        LocalDate startDate = LocalDate.parse(dates.get(0));
+        return getStarPublicPoolTrend(startDate.toString(), LocalDate.now().toString());
+    }
+
+    @Override
+    public StarPublicPoolTrendVO getStarPublicPoolTrend(String startDate, String endDate) {
+        LocalDate start = parseDateOrDefault(startDate, LocalDate.now().minusDays(6));
+        LocalDate end = parseDateOrDefault(endDate, LocalDate.now());
+        if (end.isBefore(start)) {
+            LocalDate tmp = start;
+            start = end;
+            end = tmp;
+        }
+        List<String> dates = buildDateLabels(start, end);
+        List<Map<String, Object>> entryRows = jdbcTemplate.queryForList("""
+                SELECT DATE_FORMAT(stat_date, '%Y-%m-%d') AS stat_date,
+                       SUM(entry_count) AS total
+                FROM cust_public_pool_star_daily_stat
+                WHERE stat_date >= ? AND stat_date <= ?
+                GROUP BY stat_date
+                ORDER BY stat_date ASC
+                """, java.sql.Date.valueOf(start), java.sql.Date.valueOf(end));
+        Map<String, Integer> entryMap = entryRows.stream()
+                .collect(Collectors.toMap(row -> Objects.toString(row.get("stat_date"), ""),
+                        row -> toInt(row.get("total")), (a, b) -> a));
+        List<Integer> entryCounts = dates.stream()
+                .map(date -> entryMap.getOrDefault(date, 0))
+                .collect(Collectors.toList());
+        List<Integer> currentCounts = dates.stream()
+                .map(date -> 0)
+                .collect(Collectors.toList());
+        return new StarPublicPoolTrendVO()
+                .setDates(dates)
+                .setStarEntryCounts(entryCounts)
+                .setCurrentStarCounts(currentCounts);
+    }
+
+    @Override
+    public HourlyAdmissionStatsVO getTodayHourlyAdmissionStats(String channel) {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
+                SELECT stat_hour,
+                       COUNT(1) AS total_count,
+                       SUM(CASE WHEN admission_passed = 1 THEN 1 ELSE 0 END) AS passed_count
+                FROM cust_api_admission_stat_event
+                WHERE stat_date = CURDATE()
+                  AND (? IS NULL OR COALESCE(NULLIF(channel_name, ''), '未知渠道') = ?)
+                GROUP BY stat_hour
+                ORDER BY stat_hour ASC
+                """, normalizeChannel(channel), normalizeChannel(channel));
+        List<String> hours = new ArrayList<>();
+        List<Integer> passedCounts = new ArrayList<>();
+        List<Double> passRates = new ArrayList<>();
+        for (Map<String, Object> row : rows) {
+            int hour = toInt(row.get("stat_hour"));
+            int total = toInt(row.get("total_count"));
+            int passed = toInt(row.get("passed_count"));
+            hours.add(String.format("%02d:00", hour));
+            passedCounts.add(passed);
+            passRates.add(total <= 0 ? 0D : BigDecimal.valueOf(passed * 100.0 / total)
+                    .setScale(2, java.math.RoundingMode.HALF_UP).doubleValue());
+        }
+        return new HourlyAdmissionStatsVO()
+                .setHours(hours)
+                .setPassedCounts(passedCounts)
+                .setPassRates(passRates);
+    }
+
+    private int normalizeDays(int days) {
+        if (days == 3 || days == 7) {
+            return days;
+        }
+        return 7;
+    }
+
+    private List<String> buildDateLabels(int days) {
+        LocalDate start = LocalDate.now().minusDays(days - 1L);
+        return buildDateLabels(start, LocalDate.now());
+    }
+
+    private List<String> buildDateLabels(LocalDate start, LocalDate end) {
+        List<String> labels = new ArrayList<>();
+        LocalDate cursor = start;
+        while (!cursor.isAfter(end)) {
+            labels.add(cursor.toString());
+            cursor = cursor.plusDays(1);
+        }
+        return labels;
+    }
+
+    private String normalizeChannel(String channel) {
+        return StringUtils.isBlank(channel) ? null : channel.trim();
+    }
+
+    private LocalDate parseDateOrDefault(String value, LocalDate defaultValue) {
+        if (StringUtils.isBlank(value)) {
+            return defaultValue;
+        }
+        try {
+            return LocalDate.parse(value.trim());
+        } catch (Exception e) {
+            return defaultValue;
+        }
+    }
+
+    private int toInt(Object value) {
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        if (value == null) {
+            return 0;
+        }
+        try {
+            return Integer.parseInt(value.toString());
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    private Long toLong(Object value) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        if (value == null) {
+            return null;
+        }
+        try {
+            return Long.parseLong(value.toString());
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private LocalDate toLocalDate(Date date) {

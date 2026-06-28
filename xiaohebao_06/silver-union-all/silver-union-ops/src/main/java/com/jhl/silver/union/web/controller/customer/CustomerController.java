@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.github.pagehelper.PageInfo;
 import com.google.gson.reflect.TypeToken;
 import com.jhl.silver.union.biz.common.BizConstance;
+import com.jhl.silver.union.biz.common.ResultCode;
 import com.jhl.silver.union.biz.common.enums.BizDictConfigTypeEnum;
 import com.jhl.silver.union.biz.common.enums.LoginResultEnum;
 import com.jhl.silver.union.biz.common.enums.UserAuthRoleEnum;
@@ -84,6 +85,7 @@ public class CustomerController {
     @Operation(summary = "分页获取客户列表信息")
     public SuResult<PageInfo<CustomerItemDTO>> pagedListCustomer(@RequestBody PagedListCustomerRequest request) {
         request.autoFix();
+        assertObserverPublicPoolReadOnly(request.getPublicPoolOnly());
         log.info("========>pagedListCustomer request: {}", GsonHelper.toJson(request));
         // request.setOwnerUserId(UserContext.getUserId());
         PageInfo<CustomerItemDTO> pageInfo =
@@ -255,6 +257,7 @@ public class CustomerController {
     @PostMapping("/upd-biz-cust-info")
     @Operation(summary = "更新客户业务信息。 不可更新姓名等客观事实信息")
     public SuResult<Void> updateBizCustomerInfo(@RequestBody UpdateBizCustomerInfoRequest request) {
+        assertNotObserver();
         customerInfoService.updateCustomerBizInfo(request, UserContext.getUserId(), UserContext.getRoles());
         return SuResultUtils.successResult();
     }
@@ -287,6 +290,7 @@ public class CustomerController {
     public SuResult<Void> backToOcean(
             @Parameter(name = "cid", description = "客户 ID", required = true)
             @RequestParam(name = "cid") Long id) {
+        assertNotObserver();
         customerInfoService.backCustomer(id, UserContext.getUserId());
         return SuResultUtils.successResult();
     }
@@ -300,6 +304,7 @@ public class CustomerController {
     @PostMapping("/btc-rtn-cust")
     @Operation(summary = "将客户信息批量退回至公海")
     public SuResult<Void> batchBackToOcean(@RequestBody BatchBackToOceanRequest request) {
+        assertNotObserver();
         request.validate();
         customerInfoService.backCustomers(request.getCustIdList(), UserContext.getUserId(), UserContext.getDeptId());
         return SuResultUtils.successResult();
@@ -316,6 +321,7 @@ public class CustomerController {
     public SuResult<Void> claimCustomer(
             @Parameter(name = "cid", description = "客户 ID", required = true)
             @RequestParam(name = "cid") Long id) {
+        assertNotObserver();
         customerInfoService.claimCustomer(id, UserContext.getUserId(), UserContext.getDeptId());
         return SuResultUtils.successResult();
     }
@@ -329,6 +335,7 @@ public class CustomerController {
     @PostMapping("/btc-swt-fav")
     @Operation(summary = "将客户信息批量标记为不同的收藏类型")
     public SuResult<Void> batchSwitchFavorite(@RequestBody BatchSwitchFavoriteRequest request) {
+        assertNotObserver();
         request.validate();
         customerInfoService.switchFav4Customers(request.getCustIdList(), request.getFavoriteTypeEnum(),
                 UserContext.getUserId(), UserContext.getDeptId());
@@ -353,6 +360,18 @@ public class CustomerController {
         BizDictItem item = bizConfigService.getSingleBizDictItemByLabel(BizDictConfigTypeEnum.DATA_CHANNEL,
                 request.getChannelName());
         return SuResultUtils.successResult(item);
+    }
+
+    private void assertObserverPublicPoolReadOnly(Boolean publicPoolOnly) {
+        if (UserContext.hasAnyRole(UserAuthRoleEnum.ROLE_OBSERVER) && !Boolean.TRUE.equals(publicPoolOnly)) {
+            throw new BizException(ResultCode.SYS_NO_AUTH, "observer can only query public pool");
+        }
+    }
+
+    private void assertNotObserver() {
+        if (UserContext.hasAnyRole(UserAuthRoleEnum.ROLE_OBSERVER)) {
+            throw new BizException(ResultCode.SYS_NO_AUTH, "observer is read only");
+        }
     }
 
 

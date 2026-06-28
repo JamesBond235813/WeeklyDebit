@@ -10,6 +10,31 @@ import { useAuthStore } from '#/store';
 
 import { generateAccess } from './access';
 
+const OBSERVER_HOME_PATH = '/biz-work/public-pool';
+const OBSERVER_ROLE = 'ROLE_OBSERVER';
+const ANALYSIS_PATH = '/dashboard/analysis';
+const ANALYSIS_ROLES = ['ROLE_SUPPER', 'ROLE_DEPT_DATA_ADMIN'];
+
+function resolveHomePath(userInfo: null | undefined | { homePath?: string; roles?: string[] }) {
+  if (userInfo?.roles?.includes(OBSERVER_ROLE)) {
+    return OBSERVER_HOME_PATH;
+  }
+  return userInfo?.homePath || DEFAULT_HOME_PATH;
+}
+
+function sanitizeRedirectPath(path: string, userInfo: null | undefined | { homePath?: string; roles?: string[] }) {
+  if (userInfo?.roles?.includes(OBSERVER_ROLE) && path.startsWith('/dashboard')) {
+    return OBSERVER_HOME_PATH;
+  }
+  if (
+    path === ANALYSIS_PATH &&
+    !userInfo?.roles?.some((role) => ANALYSIS_ROLES.includes(role))
+  ) {
+    return resolveHomePath(userInfo);
+  }
+  return path;
+}
+
 /**
  * 通用守卫配置
  * @param router
@@ -53,11 +78,11 @@ function setupAccessGuard(router: Router) {
     // 基本路由，这些路由不需要进入权限拦截
     if (coreRouteNames.includes(to.name as string)) {
       if (to.path === LOGIN_PATH && accessStore.accessToken) {
-        return decodeURIComponent(
+        const redirectPath = decodeURIComponent(
           (to.query?.redirect as string) ||
-            userStore.userInfo?.homePath ||
-            DEFAULT_HOME_PATH,
+            resolveHomePath(userStore.userInfo),
         );
+        return sanitizeRedirectPath(redirectPath, userStore.userInfo);
       }
       return true;
     }
@@ -87,6 +112,12 @@ function setupAccessGuard(router: Router) {
 
     // 是否已经生成过动态路由
     if (accessStore.isAccessChecked) {
+      if (to.path === DEFAULT_HOME_PATH && userStore.userInfo?.roles?.includes(OBSERVER_ROLE)) {
+        return {
+          path: OBSERVER_HOME_PATH,
+          replace: true,
+        };
+      }
       return true;
     }
 
@@ -127,13 +158,14 @@ function setupAccessGuard(router: Router) {
     accessStore.setAccessMenus(accessibleMenus);
     accessStore.setAccessRoutes(accessibleRoutes);
     accessStore.setIsAccessChecked(true);
-    const redirectPath = (from.query.redirect ??
+    const rawRedirectPath = (from.query.redirect ??
       (to.path === DEFAULT_HOME_PATH
-        ? userInfo.homePath || DEFAULT_HOME_PATH
+        ? resolveHomePath(userInfo)
         : to.fullPath)) as string;
+    const redirectPath = sanitizeRedirectPath(decodeURIComponent(rawRedirectPath), userInfo);
 
     return {
-      ...router.resolve(decodeURIComponent(redirectPath)),
+      ...router.resolve(redirectPath),
       replace: true,
     };
   });

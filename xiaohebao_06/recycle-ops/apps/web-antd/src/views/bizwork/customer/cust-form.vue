@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import type { CustomerItemDetail } from '#/api/biz/customer';
 
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, ref } from 'vue';
 
 import { useVbenModal } from '@vben/common-ui';
 
@@ -9,7 +9,6 @@ import {
   Button,
   Col,
   Descriptions,
-  Divider,
   message,
   Modal,
   Row,
@@ -21,40 +20,16 @@ import {
   customerApi,
   gotNoOptions,
   houseFlagOptions,
-  marriageStatusOptions,
   yesNoOptions,
 } from '#/api/biz/customer';
-import { regionApi } from '#/api/biz/region';
 
 const outData = ref();
-const _customerGroupOptions = ref<{ label: string; value: number }[]>([]);
 const _progressOptions = ref<{ label: string; value: number }[]>([]);
-const _deptNameOptions = ref<{ label: string; value: number }[]>([]);
 const _callTipsOptions = ref<{ label: string; value: number }[]>([]);
 const canEdit = ref<boolean>(false);
-const hideLeaderRemark = ref(true);
-const customerStarEditable = ref(true);
 const customerDetailInfoRef = ref<CustomerItemDetail>({});
 const zhimaThreshold = ref<number | null>(null);
 const zhimaScoreValue = ref<number | null>(null);
-type RegionOption = {
-  id: number;
-  value: string;
-  label: string;
-  isLeaf?: boolean;
-  loading?: boolean;
-  children?: RegionOption[];
-};
-const regionOptions = ref<RegionOption[]>([]);
-const locationInfoRef = ref({
-  hukouProvince: '',
-  hukouCity: '',
-  hukouDistrict: '',
-  currentProvince: '',
-  currentCity: '',
-  currentDistrict: '',
-  currentStreet: '',
-});
 let cidList: number[] = [];
 const currentCid = ref(0);
 let userId = '';
@@ -109,7 +84,10 @@ function parseIdCardInfo(idCardNo?: string) {
   const today = new Date();
   let age = today.getFullYear() - birthDate.getFullYear();
   const monthDiff = today.getMonth() - birthDate.getMonth();
-  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+  if (
+    monthDiff < 0 ||
+    (monthDiff === 0 && today.getDate() < birthDate.getDate())
+  ) {
     age -= 1;
   }
   if (age <= 0 || age > 150) {
@@ -165,6 +143,110 @@ function getDerivedAge() {
   return customerDetailInfoRef.value?.age ?? '';
 }
 
+function displayText(value?: null | number | string) {
+  return value === 0 || value ? String(value) : '';
+}
+
+function displayZhima() {
+  return (
+    customerDetailInfoRef.value?.hyyZhimaDesc ||
+    displayText(customerDetailInfoRef.value?.zhimaScore)
+  );
+}
+
+function displayLoanAmount() {
+  return (
+    customerDetailInfoRef.value?.hyyLoanAmountDesc ||
+    displayText(customerDetailInfoRef.value?.reqLoanAmount)
+  );
+}
+
+function displayBirthday() {
+  return (
+    customerDetailInfoRef.value?.birthday ||
+    derivedIdCardInfo.value?.birthday ||
+    ''
+  );
+}
+
+function displayHukou() {
+  return formatRegion([
+    customerDetailInfoRef.value?.hukouProvince,
+    customerDetailInfoRef.value?.hukouCity,
+    customerDetailInfoRef.value?.hukouDistrict,
+  ]);
+}
+
+function displayHouseVal() {
+  return customerDetailInfoRef.value?.houseVal
+    ? `${customerDetailInfoRef.value.houseVal} 万元`
+    : '';
+}
+
+function displayProvidentAmount() {
+  return customerDetailInfoRef.value?.providentAmountYuan
+    ? `${customerDetailInfoRef.value.providentAmountYuan} 元`
+    : '';
+}
+
+function simpleItem(label: string, value?: null | number | string) {
+  return {
+    label,
+    value: displayText(value),
+  };
+}
+
+const customerInfoItems = computed(() => [
+  simpleItem('姓名', customerDetailInfoRef.value?.name),
+  simpleItem('手机号', customerDetailInfoRef.value?.mobile),
+  simpleItem('申请时间', customerDetailInfoRef.value?.applyDate),
+  simpleItem('身份证号', customerDetailInfoRef.value?.idCardNo),
+  simpleItem('性别', getDerivedSexDesc()),
+  simpleItem('年龄', getDerivedAge()),
+  simpleItem('芝麻分', displayZhima()),
+  simpleItem('婚姻', customerDetailInfoRef.value?.marriageStatusDesc),
+  simpleItem('出生日期', displayBirthday()),
+  simpleItem('手机号归属地', customerDetailInfoRef.value?.mobileArea),
+  simpleItem('户籍所在地', displayHukou()),
+]);
+
+const basicInfoItems = computed(() => [
+  simpleItem('逾期情况', customerDetailInfoRef.value?.hyyOverdueDesc),
+  simpleItem('申请贷款金额', displayLoanAmount()),
+  simpleItem('跟进状态', customerDetailInfoRef.value?.progressDesc),
+  simpleItem(
+    '社保',
+    customerDetailInfoRef.value?.hyySocialInsuranceDesc ||
+      customerDetailInfoRef.value?.socialInsuranceFlagDesc,
+  ),
+  simpleItem('芝麻分', displayZhima()),
+  simpleItem(
+    '公积金',
+    customerDetailInfoRef.value?.hyyProvidentDesc ||
+      customerDetailInfoRef.value?.providentFlagDesc,
+  ),
+  simpleItem(
+    '房',
+    customerDetailInfoRef.value?.hyyHouseDesc ||
+      customerDetailInfoRef.value?.houseFlagDesc,
+  ),
+  simpleItem(
+    '车',
+    customerDetailInfoRef.value?.hyyCarDesc ||
+      customerDetailInfoRef.value?.carFlagDesc,
+  ),
+  simpleItem('职业', customerDetailInfoRef.value?.hyyOccupationDesc),
+  simpleItem(
+    '投保',
+    customerDetailInfoRef.value?.hyyInsuranceDesc ||
+      customerDetailInfoRef.value?.insuranceFlagDesc,
+  ),
+  simpleItem('IP地址', customerDetailInfoRef.value?.hyyIp),
+  simpleItem('沟通结果', customerDetailInfoRef.value?.callTipsDesc),
+  simpleItem('房产价值', displayHouseVal()),
+  simpleItem('公积金金额', displayProvidentAmount()),
+]);
+
 const HOUSE_VAL_PLACEHOLDER = '请输入房产价值，单位万元';
 const PROVIDENT_AMOUNT_PLACEHOLDER = '请输入公积金金额，单位元';
 
@@ -216,7 +298,7 @@ function applyQualificationByTags(tags: string[], changedLabel?: string) {
     if (tag && 'fieldName' in tag) {
       const selected = tagSet.has(tag.label);
       backgroundInfoFormApi.setValues({
-        [tag.fieldName]: selected ? tag.valueOn ?? 1 : 0,
+        [tag.fieldName]: selected ? (tag.valueOn ?? 1) : 0,
       });
     }
   }
@@ -242,10 +324,7 @@ function removeRemarkTag(label: string) {
     }
     const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const regex = new RegExp(`(^|\\s+)${escaped}(?=\\s+|$)`, 'g');
-    const next = current
-      .replace(regex, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
+    const next = current.replace(regex, ' ').replace(/\s+/g, ' ').trim();
     basicInfoFormApi.setValues({ customerRemark: next });
   });
 }
@@ -297,153 +376,17 @@ function initRemarkTagSelections() {
   setAmountInputState(next.has('有房'), next.has('有公积金'));
 }
 
-const descColumns = ref(10);
-
-function calcDescColumns(width: number) {
-  if (width < 640) {
-    return 1;
-  }
-  if (width < 1024) {
-    return 2;
-  }
-  if (width < 1280) {
-    return 6;
-  }
-  return 10;
-}
-
-function updateDescColumns() {
-  if (typeof window === 'undefined') {
-    return;
-  }
-  descColumns.value = calcDescColumns(window.innerWidth);
-}
-
-function getDescSpan(span: number) {
-  return descColumns.value >= 10 ? span : 1;
-}
-
-onMounted(() => {
-  updateDescColumns();
-  window.addEventListener('resize', updateDescColumns);
-  void loadCustomerFieldConfig();
-});
-
-onBeforeUnmount(() => {
-  window.removeEventListener('resize', updateDescColumns);
-});
-
 function formatRegion(parts: Array<string | undefined>) {
   return parts.filter((item) => item && item.trim()).join('/');
 }
 
-function formatRegionWithDetail(
-  parts: Array<string | undefined>,
-  detail?: string,
-) {
-  const base = formatRegion(parts);
-  if (!detail || !detail.trim()) {
-    return base;
-  }
-  return base ? `${base} ${detail.trim()}` : detail.trim();
-}
-
-function buildAreaPath(parts: Array<string | undefined>) {
-  return parts.filter((item) => item && item.trim()).map((item) => item as string);
-}
-
-function toRegionOption(item: { id: number; name: string; leaf: boolean }) {
-  return {
-    id: item.id,
-    value: item.name,
-    label: item.name,
-    isLeaf: item.leaf,
-  } as RegionOption;
-}
-
-async function fetchRegionChildren(parentId?: number) {
-  try {
-    const list = await regionApi.listChildren(parentId);
-    return (list || []).map(toRegionOption);
-  } catch (error) {
-    return [];
-  }
-}
-
-async function initRegionOptions() {
-  if (regionOptions.value.length > 0) {
-    return;
-  }
-  regionOptions.value = await fetchRegionChildren(0);
-}
-
-async function loadRegionChildren(selectedOptions: RegionOption[]) {
-  const targetOption = selectedOptions[selectedOptions.length - 1];
-  if (!targetOption || targetOption.isLeaf || targetOption.loading) {
-    return;
-  }
-  targetOption.loading = true;
-  targetOption.children = await fetchRegionChildren(targetOption.id);
-  targetOption.loading = false;
-}
-
-async function ensureRegionPath(path: string[]) {
-  if (path.length === 0) {
-    return;
-  }
-  await initRegionOptions();
-  let currentOptions = regionOptions.value;
-  for (const name of path) {
-    const match = currentOptions.find((item) => item.value === name);
-    if (!match || match.isLeaf) {
-      return;
-    }
-    if (!match.children) {
-      match.children = await fetchRegionChildren(match.id);
-    }
-    currentOptions = match.children || [];
-  }
-}
-
-async function fillHukouFromIdCard(idCardNo?: string) {
-  const normalized = (idCardNo || '').trim();
-  if (!normalized) {
-    return;
-  }
-  try {
-    const info = await regionApi.getIdCardArea(normalized);
-    if (!info) {
-      return;
-    }
-    locationInfoRef.value = {
-      ...locationInfoRef.value,
-      hukouProvince: info.province || '',
-      hukouCity: info.city || '',
-      hukouDistrict: info.district || '',
-    };
-    const path = buildAreaPath([info.province, info.city, info.district]);
-    locationFormApi.setValues({ hukouArea: path });
-    await ensureRegionPath(path);
-  } catch (error) {
-    return;
-  }
-}
-
 async function saveCustomerBizInfo() {
   detailModalApi.setState({ loading: true });
-  const attrInfoFormData = await attrInfoFormApi.getValues();
   const basicInfoFormData = await basicInfoFormApi.getValues();
   const backgroundInfoFormData = await backgroundInfoFormApi.getValues();
-  const locationFormData = await locationFormApi.getValues();
-  const { hukouArea, currentArea, ...locationPlainData } = locationFormData || {};
-  const leaderRemarkFormData = await leaderRemarkFormApi.getValues();
   const _formData = {
-    ...attrInfoFormData,
     ...basicInfoFormData,
     ...backgroundInfoFormData,
-    ...locationPlainData,
-    ...locationInfoRef.value,
-    ...leaderRemarkFormData,
     version: customerDetailInfoRef.value.version,
     id: customerDetailInfoRef.value.id,
   };
@@ -472,7 +415,6 @@ async function saveCustomerBizInfo() {
  * 初始化下拉选项
  */
 function initSelectOptions() {
-  _customerGroupOptions.value = outData.value.customerGroupOptions;
   _progressOptions.value = (outData.value.progressOptions || []).map(
     (item: { label: string; value: number }) => {
       if (item.label === '成交') {
@@ -482,7 +424,6 @@ function initSelectOptions() {
     },
   );
   _callTipsOptions.value = outData.value.callTipsOptions;
-  _deptNameOptions.value = outData.value.deptNameOptions;
 }
 
 /**
@@ -524,7 +465,7 @@ const [detailModal, detailModalApi] = useVbenModal({
   closeOnPressEscape: false,
   centered: false,
   closeOnClickModal: false,
-  class: 'xs:w-full sm:w-4/5  w-2/3',
+  class: 'xs:w-full detail-modal-compact',
   title: '客户信息详情',
   showConfirmButton: false,
   cancelText: '关闭',
@@ -556,20 +497,17 @@ function reloadCustInfo(cid: number) {
   detailModalApi.setState({ loading: true });
   currentCid.value = cid;
   userId = outData.value.uid;
-  const hasMaintainRole = outData.value.hasMaintainRole;
   // 取用户详情
-    customerApi.getCustomerDetail(currentCid.value).then((res) => {
-      customerDetailInfoRef.value = res;
-      zhimaScoreValue.value =
-        typeof res?.zhimaScore === 'number' ? res.zhimaScore : null;
-      if (!customerDetailInfoRef.value.idCardNo && outData.value?.idCardNo) {
-        customerDetailInfoRef.value.idCardNo = String(outData.value.idCardNo).trim();
-      }
-      canEdit.value = res.ownerUserId !== null && res.ownerUserId > 0;
-    // 非本人的客户，且本人拥有超管或部门主管权限才可显示【上级评价】
-    hideLeaderRemark.value = !(
-      userId !== `${res.ownerUserId}` && hasMaintainRole
-    );
+  customerApi.getCustomerDetail(currentCid.value).then((res) => {
+    customerDetailInfoRef.value = res;
+    zhimaScoreValue.value =
+      typeof res?.zhimaScore === 'number' ? res.zhimaScore : null;
+    if (!customerDetailInfoRef.value.idCardNo && outData.value?.idCardNo) {
+      customerDetailInfoRef.value.idCardNo = String(
+        outData.value.idCardNo,
+      ).trim();
+    }
+    canEdit.value = res.ownerUserId !== null && res.ownerUserId > 0;
     initForms(canEdit.value);
     detailModalApi.setState({ loading: false });
   });
@@ -587,106 +525,15 @@ function initForms(edit: boolean) {
     return;
   }
   initSelectOptions();
-  updateCustomerStarEditState();
   if (customerDetailInfoRef.value) {
     basicInfoFormApi.setValues(customerDetailInfoRef.value);
     backgroundInfoFormApi.setValues(customerDetailInfoRef.value);
-    const idCardNo =
-      customerDetailInfoRef.value.idCardNo || outData.value?.idCardNo;
-    const hasIdCard = !!idCardNo;
-    const idCardInfo = parseIdCardInfo(idCardNo);
-    const hasValidIdCard = !!idCardInfo;
-    attrInfoFormApi.updateSchema([
-      { fieldName: 'idCardNo', disabled: hasIdCard },
-      { fieldName: 'sex', disabled: hasValidIdCard },
-      { fieldName: 'age', disabled: hasValidIdCard },
-    ]);
-    const attrValues = {
-      ...customerDetailInfoRef.value,
-      idCardNo,
-    };
-    if (idCardInfo) {
-      attrValues.sex = idCardInfo.sex;
-      attrValues.age = idCardInfo.age;
-      attrValues.birthday =
-        customerDetailInfoRef.value.birthday ?? idCardInfo.birthday;
-    }
-    attrInfoFormApi.setValues(attrValues);
     zhimaScoreValue.value =
-      typeof attrValues.zhimaScore === 'number' ? attrValues.zhimaScore : null;
+      typeof customerDetailInfoRef.value.zhimaScore === 'number'
+        ? customerDetailInfoRef.value.zhimaScore
+        : null;
     initRemarkTagSelections();
-    locationInfoRef.value = {
-      hukouProvince: customerDetailInfoRef.value.hukouProvince || '',
-      hukouCity: customerDetailInfoRef.value.hukouCity || '',
-      hukouDistrict: customerDetailInfoRef.value.hukouDistrict || '',
-      currentProvince: customerDetailInfoRef.value.currentProvince || '',
-      currentCity: customerDetailInfoRef.value.currentCity || '',
-      currentDistrict: customerDetailInfoRef.value.currentDistrict || '',
-      currentStreet: customerDetailInfoRef.value.currentStreet || '',
-    };
-    locationFormApi.setValues({
-      hukouArea: buildAreaPath([
-        customerDetailInfoRef.value.hukouProvince,
-        customerDetailInfoRef.value.hukouCity,
-        customerDetailInfoRef.value.hukouDistrict,
-      ]),
-      hukouAddressDetail: customerDetailInfoRef.value.hukouAddressDetail,
-      currentArea: buildAreaPath([
-        customerDetailInfoRef.value.currentProvince,
-        customerDetailInfoRef.value.currentCity,
-        customerDetailInfoRef.value.currentDistrict,
-        customerDetailInfoRef.value.currentStreet,
-      ]),
-      currentAddressDetail: customerDetailInfoRef.value.currentAddressDetail,
-    });
-    void initLocationForms();
-    leaderRemarkFormApi.setValues({ leaderRemark: '' });
   }
-}
-
-async function loadCustomerFieldConfig() {
-  try {
-    const list = await customerApi.getCustomerFieldConfig();
-    const keys = (list || [])
-      .map((item) => item.fieldKey)
-      .filter(Boolean);
-    if (keys.length > 0) {
-      customerStarEditable.value = keys.includes('customerGroupDesc');
-    } else {
-      customerStarEditable.value = true;
-    }
-  } catch (error) {
-    customerStarEditable.value = true;
-  }
-  updateCustomerStarEditState();
-}
-
-function updateCustomerStarEditState() {
-  basicInfoFormApi.updateSchema([
-    {
-      fieldName: 'customerGroup',
-      componentProps: {
-        disabled: !customerStarEditable.value,
-      },
-    },
-  ]);
-}
-
-async function initLocationForms() {
-  const hukouPath = buildAreaPath([
-    customerDetailInfoRef.value.hukouProvince,
-    customerDetailInfoRef.value.hukouCity,
-    customerDetailInfoRef.value.hukouDistrict,
-  ]);
-  const currentPath = buildAreaPath([
-    customerDetailInfoRef.value.currentProvince,
-    customerDetailInfoRef.value.currentCity,
-    customerDetailInfoRef.value.currentDistrict,
-    customerDetailInfoRef.value.currentStreet,
-  ]);
-  await initRegionOptions();
-  await ensureRegionPath(hukouPath);
-  await ensureRegionPath(currentPath);
 }
 
 // 编辑客户基本信息
@@ -733,14 +580,6 @@ const [EditCustBasicInfoForm, basicInfoFormApi] = useVbenForm({
         options: _progressOptions,
         style: 'max-width: 220px',
       },
-      colon: true,
-    },
-    {
-      component: 'Select',
-      fieldName: 'customerGroup',
-      label: '星级',
-      formItemClass: 'text-left',
-      componentProps: { placeholder: '请选择', options: _customerGroupOptions },
       colon: true,
     },
     {
@@ -843,251 +682,6 @@ const [EditCustBackgroundInfoForm, backgroundInfoFormApi] = useVbenForm({
     },
   ],
 });
-// 编辑客户属性信息
-const [EditCustAttrInfoForm, attrInfoFormApi] = useVbenForm({
-  compact: true,
-  commonConfig: {
-    componentProps: {
-      class: 'w-full',
-      colon: true,
-    },
-  },
-  wrapperClass: 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-10 text-left',
-  showDefaultActions: false,
-  layout: 'horizontal',
-  schema: [
-    {
-      component: 'Input',
-      fieldName: 'idCardNo',
-      label: '身份证号',
-      componentProps: {
-        placeholder: '请输入身份证号',
-        style: 'max-width: 260px',
-        onBlur: (event: FocusEvent) => {
-          const value = (event.target as HTMLInputElement)?.value;
-          const info = parseIdCardInfo(value);
-          if (info) {
-            attrInfoFormApi.getValues().then((values) => {
-              attrInfoFormApi.setValues({
-                ...values,
-                sex: info.sex,
-                age: info.age,
-                birthday: info.birthday,
-              });
-            });
-            attrInfoFormApi.updateSchema([
-              { fieldName: 'sex', disabled: true },
-              { fieldName: 'age', disabled: true },
-            ]);
-          } else {
-            attrInfoFormApi.updateSchema([
-              { fieldName: 'sex', disabled: false },
-              { fieldName: 'age', disabled: false },
-            ]);
-          }
-          void fillHukouFromIdCard(value);
-        },
-      },
-      colon: true,
-      formItemClass: 'col-span-full sm:col-span-2 lg:col-span-3 pl-2',
-    },
-    {
-      component: 'Select',
-      fieldName: 'sex',
-      label: '性别',
-      componentProps: {
-        placeholder: '请指定性别',
-        options: [
-          { label: '保密', value: 0 },
-          { label: '男', value: 1 },
-          { label: '女', value: 2 },
-        ],
-      },
-      colon: true,
-      formItemClass: 'col-span-full sm:col-span-1 lg:col-span-2 pl-2',
-    },
-    {
-      component: 'Input',
-      fieldName: 'age',
-      label: '年龄',
-      componentProps: {
-        placeholder: '请输入年龄',
-        style: 'max-width: 120px',
-      },
-      colon: true,
-      formItemClass: 'col-span-full sm:col-span-1 lg:col-span-2 pl-2',
-    },
-    {
-      component: 'InputNumber',
-      fieldName: 'zhimaScore',
-      label: '芝麻分',
-      componentProps: {
-        placeholder: '请输入芝麻分',
-        min: 0,
-        max: 950,
-        class: 'zhima-score-input',
-        onChange: (value: number | null) => {
-          zhimaScoreValue.value = typeof value === 'number' ? value : null;
-        },
-      },
-      colon: true,
-      formItemClass: 'col-span-full sm:col-span-2 lg:col-span-3',
-    },
-    {
-      component: 'Select',
-      fieldName: 'marriageStatus',
-      label: '婚姻',
-      componentProps: { placeholder: '请选择', options: marriageStatusOptions },
-      colon: true,
-      formItemClass: 'col-span-full sm:col-span-1 lg:col-span-2',
-    },
-    {
-      component: 'Input',
-      fieldName: 'birthday',
-      label: '出生日期',
-      componentProps: { placeholder: 'yyyy-MM-dd 格式' },
-      colon: true,
-      formItemClass: 'col-span-full sm:col-span-1 lg:col-span-3',
-    },
-    {
-      component: 'Input',
-      fieldName: 'mobileArea',
-      label: '手机号归属地',
-      componentProps: {
-        placeholder: '自动识别手机号归属地',
-        disabled: true,
-      },
-      colon: true,
-      formItemClass: 'col-span-full sm:col-span-2 lg:col-span-5',
-    },
-  ],
-});
-
-function syncHukouArea(values: string[] = [], selectedOptions: RegionOption[] = []) {
-  const limited = values.slice(0, 3);
-  if (values.length > 3) {
-    locationFormApi.setValues({ hukouArea: limited });
-  }
-  const labels =
-    selectedOptions.length > 0
-      ? selectedOptions.map((item) => item.label || item.value)
-      : limited;
-  locationInfoRef.value = {
-    ...locationInfoRef.value,
-    hukouProvince: labels[0] || '',
-    hukouCity: labels[1] || '',
-    hukouDistrict: labels[2] || '',
-  };
-}
-
-function syncCurrentArea(values: string[] = [], selectedOptions: RegionOption[] = []) {
-  const limited = values.slice(0, 4);
-  if (values.length > 4) {
-    locationFormApi.setValues({ currentArea: limited });
-  }
-  const labels =
-    selectedOptions.length > 0
-      ? selectedOptions.map((item) => item.label || item.value)
-      : limited;
-  locationInfoRef.value = {
-    ...locationInfoRef.value,
-    currentProvince: labels[0] || '',
-    currentCity: labels[1] || '',
-    currentDistrict: labels[2] || '',
-    currentStreet: labels[3] || '',
-  };
-}
-
-const [EditCustLocationInfoForm, locationFormApi] = useVbenForm({
-  compact: true,
-  commonConfig: {
-    componentProps: {
-      class: 'w-full',
-      colon: true,
-    },
-  },
-  wrapperClass: 'grid-cols-4 text-left',
-  showDefaultActions: false,
-  layout: 'horizontal',
-  schema: [
-    {
-      component: 'Cascader',
-      fieldName: 'hukouArea',
-      label: '户籍所在地',
-      componentProps: {
-        options: regionOptions,
-        allowClear: true,
-        changeOnSelect: true,
-        showSearch: true,
-        loadData: loadRegionChildren,
-        onChange: (values: string[], selectedOptions: RegionOption[]) => {
-          syncHukouArea(values, selectedOptions);
-        },
-      },
-      colon: true,
-      formItemClass: 'col-span-2',
-    },
-    {
-      component: 'Input',
-      fieldName: 'hukouAddressDetail',
-      label: '户籍门牌号',
-      componentProps: { placeholder: '请输入楼门号' },
-      colon: true,
-      formItemClass: 'col-span-2',
-    },
-    {
-      component: 'Cascader',
-      fieldName: 'currentArea',
-      label: '当前所在地',
-      componentProps: {
-        options: regionOptions,
-        allowClear: true,
-        changeOnSelect: true,
-        showSearch: true,
-        loadData: loadRegionChildren,
-        onChange: (values: string[], selectedOptions: RegionOption[]) => {
-          syncCurrentArea(values, selectedOptions);
-        },
-      },
-      colon: true,
-      formItemClass: 'col-span-2',
-    },
-    {
-      component: 'Input',
-      fieldName: 'currentAddressDetail',
-      label: '当前门牌号',
-      componentProps: { placeholder: '请输入楼门号' },
-      colon: true,
-      formItemClass: 'col-span-2',
-    },
-  ],
-});
-// 主管评价
-const [EditLeaderRemarkInfoForm, leaderRemarkFormApi] = useVbenForm({
-  compact: true,
-  commonConfig: {
-    componentProps: {
-      // class: 'w-full',
-      colon: true,
-    },
-  },
-  showDefaultActions: false,
-  layout: 'vertical',
-  schema: [
-    {
-      component: 'Textarea',
-      fieldName: 'leaderRemark',
-      label: '主管评价',
-      componentProps: {
-        placeholder: '请输入主管评价。 评价内容不可修改只能追加，请谨慎填写。',
-        hidden: hideLeaderRemark,
-      },
-      colon: true,
-      hideLabel: true,
-    },
-  ],
-  wrapperClass: 'grid-cols-1',
-});
 </script>
 <template>
   <detailModal>
@@ -1131,106 +725,42 @@ const [EditLeaderRemarkInfoForm, leaderRemarkFormApi] = useVbenForm({
                 </Button>
               </div>
             </div>
-            <Descriptions :column="4" class="dense-desc">
-              <Descriptions.Item label="姓名">
-                {{ customerDetailInfoRef?.name }}
-              </Descriptions.Item>
-              <Descriptions.Item label="手机号">
-                {{ customerDetailInfoRef?.mobile }}
-              </Descriptions.Item>
-              <Descriptions.Item label="申请时间" :span="2">
-                {{ customerDetailInfoRef?.applyDate }}
-              </Descriptions.Item>
-            </Descriptions>
-            <Descriptions :column="descColumns" v-if="!canEdit" class="dense-desc">
-              <Descriptions.Item label="身份证号" :span="getDescSpan(3)">
-                {{ customerDetailInfoRef?.idCardNo }}
-              </Descriptions.Item>
-              <Descriptions.Item label="性别" :span="getDescSpan(2)">
-                {{ getDerivedSexDesc() }}
-              </Descriptions.Item>
-              <Descriptions.Item label="年龄" :span="getDescSpan(2)">
-                {{ getDerivedAge() }}
-              </Descriptions.Item>
-              <Descriptions.Item label="芝麻分" :span="getDescSpan(3)">
-                <span :class="isZhimaHigh ? 'zhima-score-highlight' : ''">
-                  {{ customerDetailInfoRef?.zhimaScore ?? '' }}
+            <Descriptions
+              :column="3"
+              class="dense-desc compact-desc"
+              size="small"
+            >
+              <Descriptions.Item
+                v-for="item in customerInfoItems"
+                :key="item.label"
+                :label="item.label"
+              >
+                <span
+                  :class="
+                    item.label === '芝麻分' && isZhimaHigh
+                      ? 'zhima-score-highlight'
+                      : ''
+                  "
+                >
+                  {{ item.value }}
                 </span>
               </Descriptions.Item>
-              <Descriptions.Item label="婚姻" :span="getDescSpan(2)">
-                {{ customerDetailInfoRef?.marriageStatusDesc }}
-              </Descriptions.Item>
-              <Descriptions.Item label="出生日期" :span="getDescSpan(3)">
-                {{ customerDetailInfoRef?.birthday }}
-              </Descriptions.Item>
-              <Descriptions.Item label="手机号归属地" :span="getDescSpan(5)">
-                {{ customerDetailInfoRef?.mobileArea }}
-              </Descriptions.Item>
-              <Descriptions.Item label="户籍所在地" :span="getDescSpan(5)">
-                {{
-                  formatRegionWithDetail(
-                    [
-                      customerDetailInfoRef?.hukouProvince,
-                      customerDetailInfoRef?.hukouCity,
-                      customerDetailInfoRef?.hukouDistrict,
-                    ],
-                    customerDetailInfoRef?.hukouAddressDetail,
-                  )
-                }}
-              </Descriptions.Item>
-              <Descriptions.Item label="当前所在地" :span="getDescSpan(5)">
-                {{
-                  formatRegionWithDetail(
-                    [
-                      customerDetailInfoRef?.currentProvince,
-                      customerDetailInfoRef?.currentCity,
-                      customerDetailInfoRef?.currentDistrict,
-                      customerDetailInfoRef?.currentStreet,
-                    ],
-                    customerDetailInfoRef?.currentAddressDetail,
-                  )
-                }}
-              </Descriptions.Item>
             </Descriptions>
-            <div class="form-block" v-if="canEdit" :class="{ 'is-zhima-high': isZhimaHigh }">
-              <EditCustAttrInfoForm />
-              <Divider />
-              <EditCustLocationInfoForm />
-            </div>
           </div>
 
           <div class="section-card">
             <h3 class="section-title">基本信息</h3>
-            <Descriptions :column="3" class="dense-desc" v-if="!canEdit">
-              <Descriptions.Item label="申请贷款金额">
-                {{
-                  customerDetailInfoRef?.reqLoanAmount
-                    ? `${customerDetailInfoRef?.reqLoanAmount}元`
-                    : ''
-                }}
-              </Descriptions.Item>
-              <Descriptions.Item label="沟通结果">
-                {{ customerDetailInfoRef?.callTipsDesc }}
-              </Descriptions.Item>
-              <Descriptions.Item label="跟进状态">
-                {{ customerDetailInfoRef?.progressDesc }}
-              </Descriptions.Item>
-              <Descriptions.Item label="客户星级">
-                {{ customerDetailInfoRef?.customerGroupDesc }}
-              </Descriptions.Item>
-              <Descriptions.Item label="房产价值">
-                {{
-                  customerDetailInfoRef?.houseVal
-                    ? `${customerDetailInfoRef?.houseVal} 万元`
-                    : ''
-                }}
-              </Descriptions.Item>
-              <Descriptions.Item label="公积金金额">
-                {{
-                  customerDetailInfoRef?.providentAmountYuan
-                    ? `${customerDetailInfoRef?.providentAmountYuan} 元`
-                    : ''
-                }}
+            <Descriptions
+              :column="3"
+              class="dense-desc compact-desc hyy-desc"
+              size="small"
+            >
+              <Descriptions.Item
+                v-for="item in basicInfoItems"
+                :key="item.label"
+                :label="item.label"
+              >
+                {{ item.value }}
               </Descriptions.Item>
             </Descriptions>
             <div class="remark-block" v-if="!canEdit">
@@ -1257,40 +787,9 @@ const [EditLeaderRemarkInfoForm, leaderRemarkFormApi] = useVbenForm({
               </div>
             </div>
           </div>
-
         </Col>
 
-        <Col :flex="'0 1 clamp(300px, 30vw, 440px)'" class="detail-col detail-right">
-          <div class="section-card">
-            <h3 class="section-title">主管评价</h3>
-            <div class="form-block" v-if="canEdit">
-              <EditLeaderRemarkInfoForm />
-            </div>
-            <div class="list-scroll">
-              <template
-                v-for="leaderRemark in customerDetailInfoRef?.leaderRemarkList"
-                :key="leaderRemark.id"
-              >
-                <Row class="list-item">
-                  <Col :span="4" class="list-author">
-                    {{ leaderRemark.optUserName }}
-                  </Col>
-                  <Col :span="14" class="list-content">
-                    <template
-                      v-for="desc in leaderRemark.descList"
-                      :key="desc.id"
-                    >
-                      {{ desc?.replace('[上级评价]:', '') }}
-                    </template>
-                  </Col>
-                  <Col :span="6" class="list-time">
-                    {{ leaderRemark.updTime }}
-                  </Col>
-                </Row>
-              </template>
-            </div>
-          </div>
-
+        <Col :flex="'0 0 300px'" class="detail-col detail-right">
           <div class="section-card">
             <h3 class="section-title">跟进历史</h3>
             <div class="list-scroll list-scroll--tall">
@@ -1319,36 +818,46 @@ const [EditLeaderRemarkInfoForm, leaderRemarkFormApi] = useVbenForm({
     </div>
     <template #prepend-footer>
       <div v-if="canEdit" class="footer-actions">
-        <Button type="default" @click="initForms(canEdit)">
-          重置
-        </Button>
-        <Button type="primary" @click="saveCustomerBizInfo()">
-          保存
-        </Button>
+        <Button type="default" @click="initForms(canEdit)"> 重置 </Button>
+        <Button type="primary" @click="saveCustomerBizInfo()"> 保存 </Button>
       </div>
     </template>
   </detailModal>
 </template>
 <style scoped>
+:global(.detail-modal-compact) {
+  width: min(980px, calc(100vw - 32px)) !important;
+}
+
 .detail-wrap {
   width: 100%;
 }
 
 .detail-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 12px;
   align-items: flex-start;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
 }
 
 .detail-col {
+  display: block;
+  flex: none !important;
   min-width: 0;
+  max-width: none;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
 }
 
 .detail-left {
-  min-width: 560px;
+  min-width: 0;
 }
 
 .detail-right {
-  min-width: 320px;
-  max-width: 460px;
+  min-width: 0;
+  max-width: 300px;
 }
 
 .footer-actions {
@@ -1359,11 +868,11 @@ const [EditLeaderRemarkInfoForm, leaderRemarkFormApi] = useVbenForm({
 
 .section-card {
   border: 1px solid hsl(var(--border));
-  border-radius: 12px;
+  border-radius: 8px;
   background: hsl(var(--card));
-  padding: 16px;
+  padding: 12px;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .section-head {
@@ -1405,7 +914,18 @@ const [EditLeaderRemarkInfoForm, leaderRemarkFormApi] = useVbenForm({
 }
 
 .dense-desc {
-  margin-bottom: 8px;
+  margin-bottom: 6px;
+}
+
+.compact-desc :deep(.ant-descriptions-row > th),
+.compact-desc :deep(.ant-descriptions-row > td) {
+  padding-bottom: 6px;
+}
+
+.compact-desc :deep(.ant-descriptions-item-label),
+.compact-desc :deep(.ant-descriptions-item-content) {
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .form-block {
@@ -1446,7 +966,7 @@ const [EditLeaderRemarkInfoForm, leaderRemarkFormApi] = useVbenForm({
 }
 
 .list-scroll--tall {
-  max-height: 320px;
+  max-height: 560px;
 }
 
 .list-item {
@@ -1502,11 +1022,15 @@ const [EditLeaderRemarkInfoForm, leaderRemarkFormApi] = useVbenForm({
 }
 
 :global(.dark) .form-block.is-zhima-high :deep(.zhima-score-input),
-:global([data-theme='dark']) .form-block.is-zhima-high :deep(.zhima-score-input) {
+:global([data-theme='dark'])
+  .form-block.is-zhima-high
+  :deep(.zhima-score-input) {
   background: rgba(248, 113, 113, 0.25);
 }
 
-:global(.dark) .form-block.is-zhima-high :deep(.zhima-score-input .ant-input-number-input),
+:global(.dark)
+  .form-block.is-zhima-high
+  :deep(.zhima-score-input .ant-input-number-input),
 :global([data-theme='dark'])
   .form-block.is-zhima-high
   :deep(.zhima-score-input .ant-input-number-input) {
@@ -1532,7 +1056,7 @@ const [EditLeaderRemarkInfoForm, leaderRemarkFormApi] = useVbenForm({
 
 @media (max-width: 1024px) {
   .detail-row {
-    flex-direction: column;
+    grid-template-columns: 1fr;
   }
 
   .detail-left,
@@ -1543,7 +1067,7 @@ const [EditLeaderRemarkInfoForm, leaderRemarkFormApi] = useVbenForm({
   }
 
   .detail-right {
-    flex: 1 1 0 !important;
+    max-width: none;
   }
 }
 </style>

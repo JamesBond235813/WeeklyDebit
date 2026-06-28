@@ -29,6 +29,29 @@ const router = createRouter({
   // strict: true,
 });
 
+const CHUNK_RELOAD_KEY = 'su-ops-chunk-reload-once';
+
+router.onError((error) => {
+  const message = `${error?.message || ''} ${error?.stack || ''}`;
+  const isChunkLoadError =
+    /Failed to fetch dynamically imported module/i.test(message) ||
+    /Importing a module script failed/i.test(message) ||
+    /Loading chunk .* failed/i.test(message);
+  if (!import.meta.env.PROD || !isChunkLoadError) {
+    return;
+  }
+  if (sessionStorage.getItem(CHUNK_RELOAD_KEY) === '1') {
+    sessionStorage.removeItem(CHUNK_RELOAD_KEY);
+    return;
+  }
+  sessionStorage.setItem(CHUNK_RELOAD_KEY, '1');
+  window.location.reload();
+});
+
+router.afterEach(() => {
+  sessionStorage.removeItem(CHUNK_RELOAD_KEY);
+});
+
 const resetRoutes = () => resetStaticRoutes(router, routes);
 
 // 创建路由守卫

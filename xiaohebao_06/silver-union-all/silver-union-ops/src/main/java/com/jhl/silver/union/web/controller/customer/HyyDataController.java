@@ -9,6 +9,9 @@ import com.jhl.silver.union.biz.customer.dal.entity.CustPushRecordDO;
 import com.jhl.silver.union.biz.customer.dal.entity.CustomerInfoItemDO;
 import com.jhl.silver.union.biz.customer.manager.CustomerInfoItemManager;
 import com.jhl.silver.union.biz.customer.service.CustPushRecordService;
+import com.jhl.silver.union.biz.customer.service.FeishuBotNotifyService;
+import com.jhl.silver.union.biz.customer.service.HyyCollisionRemoteClient;
+import com.jhl.silver.union.biz.customer.service.HyyValueTranslator;
 import com.jhl.silver.union.biz.customer.service.ImportCustDataService;
 import com.jhl.silver.union.biz.data.EnableRecvConfig;
 import com.jhl.silver.union.biz.sys.service.SysConfigService;
@@ -24,8 +27,10 @@ import io.swagger.v3.oas.annotations.Operation;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -56,6 +61,8 @@ public class HyyDataController {
     private final CustomerInfoItemManager customerInfoItemManager;
     private final CustPushRecordService custPushRecordService;
     private final ImportCustDataService importCustDataService;
+    private final HyyCollisionRemoteClient hyyCollisionRemoteClient;
+    private final FeishuBotNotifyService feishuBotNotifyService;
 
     @PostMapping("/access-check")
     @Operation(summary = "花易用八位撞库接口", description = "不校验用户登录信息")
@@ -77,17 +84,27 @@ public class HyyDataController {
             }
             phoneCode = bizReq.getPhoneCode();
             List<CustomerInfoItemDO> prefixMatches = listByPhoneCode(bizReq.getPhoneCode());
-            List<String> md5List = prefixMatches.stream()
+            Set<String> md5Set = new LinkedHashSet<>();
+            prefixMatches.stream()
                     .map(CustomerInfoItemDO::getMobileMd5)
                     .filter(StringUtils::isNotBlank)
-                    .distinct()
-                    .toList();
-            boolean duplicated = isDuplicatedCustomer(prefixMatches, bizReq.getNameMd5(), bizReq.getIdnoMd5());
+                    .forEach(md5Set::add);
+            boolean localDuplicated = isDuplicatedCustomer(prefixMatches, bizReq.getNameMd5(), bizReq.getIdnoMd5());
+            HyyCollisionRemoteClient.CollisionCheckResult remoteResult =
+                    hyyCollisionRemoteClient.check(bizReq.getPhoneCode(), bizReq.getNameMd5(), bizReq.getIdnoMd5());
+            if (CollectionUtils.isNotEmpty(remoteResult.getMd5List())) {
+                remoteResult.getMd5List().stream()
+                        .filter(StringUtils::isNotBlank)
+                        .forEach(md5Set::add);
+            }
+            boolean duplicated = localDuplicated || remoteResult.isDuplicated();
             existedFlag = duplicated ? 1 : 0;
             if (duplicated) {
+                feishuBotNotifyService.notifyHyyAccessCheckBlocked(bizReq.getPhoneCode(),
+                        resolveCollisionCandidateCount(remoteResult, prefixMatches));
                 return failed(CODE_DUPLICATED, "撞库失败，存在相同客户");
             }
-            HyyAccessCheckResult result = buildAccessCheckResult(md5List);
+            HyyAccessCheckResult result = buildAccessCheckResult(new ArrayList<>(md5Set));
             accessRequestId = result.getRequestId();
             return success(result, "撞库通过，可以进件");
         } catch (IllegalArgumentException | BizException e) {
@@ -140,7 +157,8 @@ public class HyyDataController {
                 return response;
             }
             PushCustInfoItem item = convertPushItem(bizReq);
-            importCustDataService.addCustInfo(List.of(item), 0L, 0L);
+            importCustDataService.addApiPushedCustInfo(List.of(item), 0L, 0L);
+            updateHyyExtendedFields(bizReq);
             response = success(null, "success");
             return response;
         } catch (IllegalArgumentException | BizException e) {
@@ -210,8 +228,7 @@ public class HyyDataController {
 
     private List<CustomerInfoItemDO> listByPhoneCode(String phoneCode) {
         LambdaQueryWrapper<CustomerInfoItemDO> wrapper = new LambdaQueryWrapper<>();
-        wrapper.likeRight(CustomerInfoItemDO::getMobile, phoneCode)
-                .last("limit 200");
+        wrapper.likeRight(CustomerInfoItemDO::getMobile, phoneCode);
         return customerInfoItemManager.list(wrapper);
     }
 
@@ -243,6 +260,17 @@ public class HyyDataController {
         return false;
     }
 
+    private int resolveCollisionCandidateCount(HyyCollisionRemoteClient.CollisionCheckResult remoteResult,
+            List<CustomerInfoItemDO> localMatches) {
+        if (remoteResult != null && remoteResult.getMd5Count() > 0) {
+            return remoteResult.getMd5Count();
+        }
+        if (remoteResult != null && CollectionUtils.isNotEmpty(remoteResult.getMd5List())) {
+            return remoteResult.getMd5List().size();
+        }
+        return CollectionUtils.isEmpty(localMatches) ? 0 : localMatches.size();
+    }
+
     private HyyAccessCheckResult buildAccessCheckResult(List<String> md5List) {
         List<HyyAccessCheckResult.ProductAgreement> agreements = new ArrayList<>();
         agreements.add(new HyyAccessCheckResult.ProductAgreement()
@@ -258,7 +286,7 @@ public class HyyDataController {
                 .setProductRatio("以审批结果为准")
                 .setProductAgreement(agreements)
                 .setMd5List(md5List)
-                .setPrice(null)
+                .setPrice(2)
                 .setPreUrl("");
     }
 
@@ -268,8 +296,7 @@ public class HyyDataController {
                 .setMobile(request.getPhone())
                 .setIdCardNo(request.getIdno())
                 .setChannelName(HYY_CHANNEL_NAME)
-                .setCustomerRemark(buildCustomerRemark(request))
-                .setReqLoanAmount(toLoanAmount(request.getLoanAmount()))
+                .setReqLoanAmount(HyyValueTranslator.loanAmountUpperBound(request.getLoanAmount()))
                 .setHouseFlagDescription(Objects.equals(request.getHouse(), 1) ? HouseFlagEnum.YES.desc
                         : Objects.equals(request.getHouse(), 2) ? HouseFlagEnum.NO.desc : HouseFlagEnum.UNKNOWN.desc)
                 .setCarFlagDescription(toBizFlagDesc(request.getCar()))
@@ -279,33 +306,38 @@ public class HyyDataController {
                 .setAge(request.getAge())
                 .setProvidentFlagDescription(toBizFlagDesc(request.getGjj()))
                 .setSocialInsuranceFlagDescription(toBizFlagDesc(request.getShebao()))
-                .setInsuranceFlagDescription(toBizFlagDesc(request.getInsurance()));
+                .setInsuranceFlagDescription(toBizFlagDesc(request.getInsurance()))
+                .setUpstreamZhimaCode(request.getZhima())
+                .setUserSource(StringUtils.trimToEmpty(request.getChannelId()));
     }
 
-    private String buildCustomerRemark(HyyPushRequest request) {
-        return "花易用request_id:" + StringUtils.trimToEmpty(request.getRequestId())
-                + "; 工作城市:" + StringUtils.trimToEmpty(request.getWorkingCity())
-                + "; 逾期:" + nullableToString(request.getOverdue())
-                + "; 芝麻分档:" + nullableToString(request.getZhima())
-                + "; 职业:" + nullableToString(request.getOccupation())
-                + "; IP:" + StringUtils.trimToEmpty(request.getIp());
-    }
-
-    private String nullableToString(Object value) {
-        return value == null ? "" : String.valueOf(value);
-    }
-
-    private Integer toLoanAmount(Integer code) {
-        if (code == null) {
-            return null;
+    private void updateHyyExtendedFields(HyyPushRequest request) {
+        if (request == null || StringUtils.isBlank(request.getPhone())) {
+            return;
         }
-        return switch (code) {
-            case 1 -> 30000;
-            case 2 -> 50000;
-            case 3 -> 100000;
-            case 4 -> 150000;
-            default -> null;
-        };
+        LambdaQueryWrapper<CustomerInfoItemDO> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(CustomerInfoItemDO::getMobile, StringUtils.trim(request.getPhone()))
+                .last("limit 1");
+        CustomerInfoItemDO customer = customerInfoItemManager.getOne(wrapper);
+        if (customer == null || customer.getId() == null) {
+            return;
+        }
+        CustomerInfoItemDO toUpdate = new CustomerInfoItemDO()
+                .setId(customer.getId())
+                .setCustomerRemark("")
+                .setZhimaScore(null)
+                .setHyyHouseDesc(HyyValueTranslator.house(request.getHouse()))
+                .setHyyCarDesc(HyyValueTranslator.car(request.getCar(), request.getCarPrice(), request.getCarStatus()))
+                .setHyyProvidentDesc(HyyValueTranslator.socialSecurity(request.getGjj()))
+                .setHyySocialInsuranceDesc(HyyValueTranslator.socialSecurity(request.getShebao()))
+                .setHyyInsuranceDesc(HyyValueTranslator.insurance(request.getInsurance()))
+                .setHyyOccupationDesc(HyyValueTranslator.occupation(request.getOccupation()))
+                .setHyyOverdueDesc(HyyValueTranslator.overdue(request.getOverdue()))
+                .setHyyZhimaDesc(HyyValueTranslator.zhima(request.getZhima()))
+                .setHyyLoanAmountDesc(HyyValueTranslator.loanAmount(request.getLoanAmount()))
+                .setHyyIp(StringUtils.trimToEmpty(request.getIp()))
+                .setUserSource(StringUtils.trimToEmpty(request.getChannelId()));
+        customerInfoItemManager.updateById(toUpdate);
     }
 
     private String toBizFlagDesc(Integer code) {

@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.jhl.silver.union.SilverUnionOpsApplicationTests;
 import com.jhl.silver.union.biz.common.ResultCode;
+import com.jhl.silver.union.biz.common.enums.UserAuthRoleEnum;
 import com.jhl.silver.union.biz.customer.dal.entity.CustomerInfoItemDO;
 import com.jhl.silver.union.biz.customer.dal.entity.CustomerInfoItemTraceDO;
 import com.jhl.silver.union.biz.customer.manager.CustomerInfoItemManager;
@@ -19,6 +20,7 @@ import com.jhl.silver.union.commons.utils.SuDateUtils;
 import com.jhl.silver.union.web.data.admin.AddCustomerInfoRequest;
 import com.jhl.silver.union.web.data.admin.DispatchCustomerInfoRequest;
 import com.jhl.silver.union.web.data.admin.UpdCustomerInfoRequest;
+import com.jhl.silver.union.web.data.customer.CustomerItemDetailDTO;
 import com.jhl.silver.union.web.data.customer.UpdateBizCustomerInfoRequest;
 import io.micrometer.tracing.annotation.NewSpan;
 import jakarta.annotation.Resource;
@@ -47,6 +49,28 @@ class CustomerInfoServiceImplTest extends SilverUnionOpsApplicationTests {
     private SuUserInfoManager suUserInfoManager;
     @Resource
     private CustomerInfoItemManager itemManager;
+
+    @Test
+    void salesCanViewEnterprisePublicPoolCustomerDetail() {
+        CustomerInfoItemDO item = new CustomerInfoItemDO()
+                .setName("公海详情测试")
+                .setMobile("13900019999")
+                .setOwnerUserId(0L)
+                .setOwnerDeptId(0L)
+                .setApplyDate(new Date())
+                .setProgress(1);
+        itemManager.save(item);
+        try {
+            CustomerItemDetailDTO detail = customerInfoService.getCustomerItemDetail(
+                    item.getId(), 9L, 1L, Set.of(UserAuthRoleEnum.ROLE_SALES));
+
+            Assertions.assertNotNull(detail);
+            Assertions.assertEquals(item.getId(), detail.getId());
+            Assertions.assertEquals("公海详情测试", detail.getName());
+        } finally {
+            itemManager.removeById(item.getId());
+        }
+    }
 
     @Test
     void updateCustomerBizInfo() {
@@ -191,7 +215,7 @@ class CustomerInfoServiceImplTest extends SilverUnionOpsApplicationTests {
             dqw.eq(CustomerInfoItemTraceDO::getSourceId, existed.getId());
             traceManager.remove(dqw);
         }
-        Long id = customerInfoService.addCustomerFactInfo(request, optUserId);
+        Long id = customerInfoService.addCustomerFactInfo(request, optUserId, 6L, Set.of(UserAuthRoleEnum.ROLE_SUPPER));
         updateRequest.setId(id);
         customerInfoService.updateCustomerFactInfo(updateRequest, optUserId);
         CustomerInfoItemDO itemDO = itemManager.getById(id);
@@ -233,7 +257,7 @@ class CustomerInfoServiceImplTest extends SilverUnionOpsApplicationTests {
                 .setMobile("13800010001");
         Long id;
         try {
-            id = customerInfoService.addCustomerFactInfo(request, optUserId);
+            id = customerInfoService.addCustomerFactInfo(request, optUserId, 6L, Set.of(UserAuthRoleEnum.ROLE_SUPPER));
             Assertions.assertNotNull(id);
             CustomerInfoItemDO itemDO = itemManager.getById(id);
             Assertions.assertNotNull(itemDO);
@@ -245,7 +269,7 @@ class CustomerInfoServiceImplTest extends SilverUnionOpsApplicationTests {
         }
         request = buildFullAddCustomerInfoRequest();
         try {
-            id = customerInfoService.addCustomerFactInfo(request, optUserId);
+            id = customerInfoService.addCustomerFactInfo(request, optUserId, 6L, Set.of(UserAuthRoleEnum.ROLE_SUPPER));
             Assertions.assertNotNull(id);
             CustomerInfoItemDO itemDO = itemManager.getById(id);
             Assertions.assertNotNull(itemDO);

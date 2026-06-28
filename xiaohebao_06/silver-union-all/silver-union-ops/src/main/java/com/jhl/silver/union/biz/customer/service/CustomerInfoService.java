@@ -61,7 +61,8 @@ public interface CustomerInfoService {
      * @param optUserId
      * @return 返回入库后的 ID
      */
-    Long addCustomerFactInfo(AddCustomerInfoRequest request, Long optUserId);
+    Long addCustomerFactInfo(AddCustomerInfoRequest request, Long optUserId, Long optUserDeptId,
+            Set<UserAuthRoleEnum> roles);
 
     /**
      * 更新客户信息(可更新客户姓名，手机号, 并且无视 version 信息)

@@ -17,6 +17,7 @@ import com.jhl.silver.union.biz.customer.service.CustomerInfoService;
 import com.jhl.silver.union.biz.customer.service.CustomerUpdTraceStrategyContext;
 import com.jhl.silver.union.biz.customer.service.CustDispatchService;
 import com.jhl.silver.union.biz.customer.service.CustNoticeService;
+import com.jhl.silver.union.biz.customer.service.CustRiskRegionService;
 import com.jhl.silver.union.biz.customer.service.MobileAreaService;
 import com.jhl.silver.union.biz.data.CustomerInfoQry;
 import com.jhl.silver.union.biz.data.DeptInfo;
@@ -95,6 +96,8 @@ public class CustomerInfoServiceImpl implements CustomerInfoService {
     private CustDispatchService custDispatchService;
     @Resource
     private CustNoticeService custNoticeService;
+    @Resource
+    private CustRiskRegionService custRiskRegionService;
 
     @Override
     public PageInfo<CustomerItemDTO> pageListCustomerInfo(PagedListCustomerRequest request, Long optUserId,
@@ -125,6 +128,7 @@ public class CustomerInfoServiceImpl implements CustomerInfoService {
                 .map(e -> customerConvert.convert2CustomerItemDTO(e))
                 .collect(Collectors.toList());
         pageInfo.setList(list);
+        custRiskRegionService.setupRiskFlags(list);
         if (!needExtendQry) {
             return pageInfo;
         }
@@ -377,8 +381,15 @@ public class CustomerInfoServiceImpl implements CustomerInfoService {
             this.adaptQryByRoles(qry, optUserId, optUserDeptId, roles);
             custInfoDO = customerManager.getOne(qry.toQueryWrapper());
             if (Objects.isNull(custInfoDO)) {
-                throw new BizException(ResultCode.CUST_NOT_FOUND,
-                        "id: " + custId + ", optUserId:" + optUserId + ", optUserDeptId:" + optUserDeptId);
+                qry = new CustomerInfoQry()
+                        .setIds(List.of(custId))
+                        .setPublicPoolOnly(true);
+                this.adaptQryByRoles(qry, optUserId, optUserDeptId, roles);
+                custInfoDO = customerManager.getOne(qry.toQueryWrapper());
+                if (Objects.isNull(custInfoDO)) {
+                    throw new BizException(ResultCode.CUST_NOT_FOUND,
+                            "id: " + custId + ", optUserId:" + optUserId + ", optUserDeptId:" + optUserDeptId);
+                }
             }
         }
 
@@ -440,13 +451,20 @@ public class CustomerInfoServiceImpl implements CustomerInfoService {
     }
 
     @Override
-    public Long addCustomerFactInfo(AddCustomerInfoRequest request, Long optUserId) {
+    public Long addCustomerFactInfo(AddCustomerInfoRequest request, Long optUserId, Long optUserDeptId,
+            Set<UserAuthRoleEnum> roles) {
         VerifyUtils.notNull(optUserId, "optUserId", "请指定操作人ID", true);
+        roles = OtherUtils.defaultIfNull(roles, Set.of());
         request.validate();
         this.checkBizDict(request);
-        this.getValidDept(request.getOwnerDeptId());
+        this.applyManualCreateOwnerRule(request, optUserId, optUserDeptId, roles);
         CustomerInfoItemDO customerInfoItemDO = customerConvert
                 .convert2CustomerInfoItemDOFromAddCustomerInfoRequest(request);
+        if (!roles.contains(UserAuthRoleEnum.ROLE_SUPPER) && roles.contains(UserAuthRoleEnum.ROLE_SALES)) {
+            customerInfoItemDO.setOwnerUserId(optUserId)
+                    .setOwnerFavorite(FavoriteTypeEnum.NORMAL.code)
+                    .setFollowTime(new Date());
+        }
         this.applyIdCardInfo(customerInfoItemDO);
         this.fillMobileAreaIfBlank(customerInfoItemDO, request.getMobile());
         this.fillHukouAreaIfBlank(customerInfoItemDO);
@@ -459,6 +477,17 @@ public class CustomerInfoServiceImpl implements CustomerInfoService {
             throw BizException.makeupBy(ResultCode.CUST_INFO_ALREADY_EXISTS, List.of(request.getName(),
                     request.getMobile()), "request: " + GsonHelper.toJson(request));
         }
+    }
+
+    private void applyManualCreateOwnerRule(AddCustomerInfoRequest request, Long optUserId, Long optUserDeptId,
+            Set<UserAuthRoleEnum> roles) {
+        if (roles.contains(UserAuthRoleEnum.ROLE_SUPPER)) {
+            this.getValidDept(request.getOwnerDeptId());
+            return;
+        }
+        VerifyUtils.notNull(optUserDeptId, "optUserDeptId", "当前用户未归属部门，不能新增客户", true);
+        this.getValidDept(optUserDeptId);
+        request.setOwnerDeptId(optUserDeptId);
     }
 
     @Override
@@ -601,14 +630,17 @@ public class CustomerInfoServiceImpl implements CustomerInfoService {
                 "id:" + id + ",optUserId:" + optUserId);
         VerifyUtils.verifyTrue(Objects.equals(existed.getOwnerUserId(), 0L),
                 "该客户已被领取或分配，请刷新后再试", true);
+        boolean starPublicPool = isPublicPoolStar(existed);
         CustomerInfoItemDO toUpdate = new CustomerInfoItemDO()
                 .setId(id)
                 .setOwnerUserId(optUserId)
                 .setOwnerDeptId(optUserDeptId)
                 .setOwnerFavorite(FavoriteTypeEnum.NORMAL.code)
+                .setPublicPoolStarFlag(CommonConstant.NO)
                 .setFollowTime(new Date())
                 .setVersion(existed.getVersion());
         this.updateCustomerInfoWithTraceInfo(toUpdate, existed, optUserId, false, Map.of("id", id));
+        custDispatchService.recordManualAssignment(optUserId, optUserDeptId, 1, starPublicPool ? 1 : 0);
     }
 
     @Override
@@ -760,6 +792,7 @@ public class CustomerInfoServiceImpl implements CustomerInfoService {
             return;
         }
         Map<Long, Integer> countMap = new HashMap<>();
+        Map<Long, Integer> starCountMap = new HashMap<>();
         Map<Long, Long> deptMap = new HashMap<>();
         for (Pair<CustomerInfoItemDO, CustomerInfoItemDO> pair : list) {
             CustomerInfoItemDO toUpdate = pair.getFirst();
@@ -767,9 +800,14 @@ public class CustomerInfoServiceImpl implements CustomerInfoService {
                 continue;
             }
             countMap.merge(toUpdate.getOwnerUserId(), 1, Integer::sum);
+            CustomerInfoItemDO existed = pair.getSecond();
+            if (existed != null
+                    && Objects.equals(existed.getOwnerUserId(), 0L)
+                    && isPublicPoolStar(existed)) {
+                starCountMap.merge(toUpdate.getOwnerUserId(), 1, Integer::sum);
+            }
             Long deptId = toUpdate.getOwnerDeptId();
             if (deptId == null) {
-                CustomerInfoItemDO existed = pair.getSecond();
                 deptId = existed != null ? existed.getOwnerDeptId() : null;
             }
             if (deptId != null) {
@@ -778,8 +816,12 @@ public class CustomerInfoServiceImpl implements CustomerInfoService {
         }
         countMap.forEach((userId, count) -> {
             Long deptId = deptMap.get(userId);
-            custDispatchService.recordManualAssignment(userId, deptId, count);
+            custDispatchService.recordManualAssignment(userId, deptId, count, starCountMap.getOrDefault(userId, 0));
         });
+    }
+
+    private boolean isPublicPoolStar(CustomerInfoItemDO item) {
+        return item != null && item.getPublicPoolStarFlag() != null && item.getPublicPoolStarFlag() > 0;
     }
 
     /**
@@ -835,6 +877,9 @@ public class CustomerInfoServiceImpl implements CustomerInfoService {
             toUpdate.setOwnerDeptId(request.getOwnerDeptId())
                     .setOwnerUserId(request.getOwnerId())// ownerId 可能为 null， 表示不更新人，
                     .setFollowTime(followTime);
+            if (Objects.nonNull(request.getOwnerId()) && request.getOwnerId() > 0L) {
+                toUpdate.setPublicPoolStarFlag(CommonConstant.NO);
+            }
             if (!Objects.equals(existed.getOwnerDeptId(), request.getOwnerDeptId()) && existed.getOwnerUserId() > 0L) {
                 // 把数据从原归属人剥离， 分配给新的部门时，必须指定新归属人 ID，当然， 新归属人也可以是0， 表示投入对应部门的公海
                 VerifyUtils.notNull(request.getOwnerId(), "ownerId",

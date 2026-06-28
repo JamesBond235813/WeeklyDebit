@@ -212,14 +212,20 @@ public class CustDispatchServiceImpl implements CustDispatchService {
 
     @Override
     public void recordManualAssignment(Long userId, Long deptId, int count) {
+        recordManualAssignment(userId, deptId, count, 0);
+    }
+
+    @Override
+    public void recordManualAssignment(Long userId, Long deptId, int count, int starCount) {
         if (userId == null || userId <= 0 || count <= 0) {
             return;
         }
         if (deptId == null) {
             deptId = 0L;
         }
+        int safeStarCount = Math.max(starCount, 0);
         Date statDate = getTodayDate();
-        int updated = dailyStatMapper.incrementManualCountBy(statDate, userId, count);
+        int updated = dailyStatMapper.incrementManualAndStarCountBy(statDate, userId, count, safeStarCount);
         if (updated > 0) {
             return;
         }
@@ -228,11 +234,12 @@ public class CustDispatchServiceImpl implements CustDispatchService {
                 .setUserId(userId)
                 .setDeptId(deptId)
                 .setAutoCount(0)
-                .setManualCount(count);
+                .setManualCount(count)
+                .setStarManualCount(safeStarCount);
         try {
             dailyStatManager.save(stat);
         } catch (Exception e) {
-            dailyStatMapper.incrementManualCountBy(statDate, userId, count);
+            dailyStatMapper.incrementManualAndStarCountBy(statDate, userId, count, safeStarCount);
         }
     }
 
@@ -250,7 +257,8 @@ public class CustDispatchServiceImpl implements CustDispatchService {
                 .setUserId(userId)
                 .setDeptId(deptId)
                 .setAutoCount(1)
-                .setManualCount(0);
+                .setManualCount(0)
+                .setStarManualCount(0);
         try {
             dailyStatManager.save(stat);
             return true;

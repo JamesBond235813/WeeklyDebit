@@ -145,6 +145,15 @@ public class PagedListCustomerRequest extends BasePagedRequest {
     @Schema(description = "是否只查询公海数据")
     private Boolean publicPoolOnly;
 
+    @Schema(description = "是否公海重点标识。1:☆或☆☆; 2:☆☆; 0:其他")
+    private Integer publicPoolStarFlag;
+
+    @Schema(description = "地区筛选省份")
+    private String regionProvince;
+
+    @Schema(description = "地区筛选城市")
+    private String regionCity;
+
     public void autoFix() {
         super.autoFix();
         if (orderByFollowTimeDesc == null && orderByApplyDateDesc == null) {

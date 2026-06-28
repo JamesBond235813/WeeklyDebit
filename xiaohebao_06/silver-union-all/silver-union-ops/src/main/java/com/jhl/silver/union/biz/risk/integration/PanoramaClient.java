@@ -78,7 +78,8 @@ public class PanoramaClient {
         payload.put("body", bodyJson);
 
         String requestJson = GsonHelper.toJson(payload);
-        log.info("Panorama API Request: {}", requestJson);
+        log.info("Panorama API Request: requestId={}, productNo={}, merchantNo={}",
+                requestId, productNo, mask(config.getMerchantNo()));
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(config.getApiUrl()))
@@ -89,7 +90,8 @@ public class PanoramaClient {
 
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() == 200) {
-            log.info("Panorama API Response: {}", response.body());
+            log.info("Panorama API Response: requestId={}, productNo={}, bodySize={}",
+                    requestId, productNo, response.body() == null ? 0 : response.body().length());
             return response.body();
         }
 
@@ -113,5 +115,12 @@ public class PanoramaClient {
         } catch (Exception e) {
             throw new RuntimeException("MD5 Error", e);
         }
+    }
+
+    private String mask(String value) {
+        if (value == null || value.length() <= 6) {
+            return "***";
+        }
+        return value.substring(0, 3) + "***" + value.substring(value.length() - 3);
     }
 }

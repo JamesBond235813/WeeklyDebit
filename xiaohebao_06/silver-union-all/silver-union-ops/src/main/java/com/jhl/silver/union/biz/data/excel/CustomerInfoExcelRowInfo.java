@@ -116,6 +116,14 @@ public class CustomerInfoExcelRowInfo {
     private BizFlagEnum socialInsuranceFlagEnum;
     private String insuranceFlagDescription;
     private BizFlagEnum insuranceFlagEnum;
+    /**
+     * 上游 API 推送的芝麻分档位，非 Excel 导入字段。
+     */
+    private Integer upstreamZhimaCode;
+    /**
+     * 上游 API 推送的用户来源，非 Excel 导入字段。
+     */
+    private String userSource;
 
     public boolean isEmpty() {
         boolean empty = true;

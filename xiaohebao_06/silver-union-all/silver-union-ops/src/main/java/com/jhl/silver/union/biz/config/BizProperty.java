@@ -67,6 +67,29 @@ public class BizProperty {
      */
     private String pushCustAesKey;
 
+    /**
+     * 飞书机器人 webhook。为空时不发送上游新增客户群通知。
+     */
+    private String feishuBotWebhook;
 
+    /**
+     * 进入公海专用飞书机器人 webhook。为空时不发送进入公海通知。
+     */
+    private String feishuPublicPoolBotWebhook;
+
+    /**
+     * HYY 存量客户撞库服务地址。为空时不调用远程撞库库。
+     */
+    private String hyyCollisionServiceUrl;
+
+    /**
+     * HYY 存量客户撞库服务访问令牌。
+     */
+    private String hyyCollisionServiceToken;
+
+    /**
+     * HYY 存量客户撞库服务请求超时时间，单位毫秒。
+     */
+    private Integer hyyCollisionServiceTimeoutMs = 1000;
 
 }

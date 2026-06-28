@@ -17,15 +17,17 @@
 
 ## 本地运行
 
-- 默认使用 **default profile**（不指定 `spring.profiles.active` 即可）。
+- 本地开发统一使用 **local profile**。
+- 本地 MySQL 固定为：`127.0.0.1:3306 / weeklydebit_su_ops_plus_20260126`。
+- `bootstrap.yml` 已与 `bootstrap-local.yml` 保持本地库口径一致，避免误连测试库或云端库。
 - 本地运行时，先执行 `source ~/.zshrc`, 再执行`j17`, 确保切换到 jdk17 + maven 3.9.9环境
 - 推荐启动方式：
-  - `./mvnw -pl silver-union-ops -am spring-boot:run`
+  - `./mvnw -pl silver-union-ops -am spring-boot:run -Dspring-boot.run.profiles=local`
 
 ## 配置说明
 
-- 运行配置位于 `silver-union-ops/src/main/resources/`（如 `application.yml` / `application-*.yml`）。
-- 本地开发默认 profile（default）。
+- 本地运行配置位于 `silver-union-ops/src/main/resources/bootstrap.yml` 和 `bootstrap-local.yml`。
+- 非本地 profile 已移出 `src/main/resources`，归档到 `config-archive/non-local-profiles/`，避免本地误用。
 
 ## 代码生成器（silver-union-z-generator）
 

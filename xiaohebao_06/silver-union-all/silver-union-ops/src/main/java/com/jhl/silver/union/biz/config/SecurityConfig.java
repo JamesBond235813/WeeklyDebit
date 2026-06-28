@@ -53,6 +53,12 @@ public class SecurityConfig {
                                         UserAuthRoleEnum.ROLE_USER_INFO_ADMIN.role)
                                 .requestMatchers("/sys/dpt/**")
                                 .hasAnyRole(UserAuthRoleEnum.ROLE_SUPPER.role, UserAuthRoleEnum.ROLE_DEPT_INFO_ADMIN.role)
+                                .requestMatchers("/sys/cust/add-cust")
+                                .hasAnyRole(UserAuthRoleEnum.ROLE_SUPPER.role,
+                                        UserAuthRoleEnum.ROLE_DEPT_INFO_ADMIN.role,
+                                        UserAuthRoleEnum.ROLE_DEPT_DATA_ADMIN.role,
+                                        UserAuthRoleEnum.ROLE_USER_INFO_ADMIN.role,
+                                        UserAuthRoleEnum.ROLE_SALES.role)
                                 .requestMatchers("/sys/cust/add-leader-remark")
                                 .hasAnyRole(UserAuthRoleEnum.ROLE_SUPPER.role, UserAuthRoleEnum.ROLE_DEPT_DATA_ADMIN.role)
                                 .requestMatchers("/sys/cust/dispatch-cust")

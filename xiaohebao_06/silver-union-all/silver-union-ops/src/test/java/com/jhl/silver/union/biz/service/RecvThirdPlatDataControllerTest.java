@@ -97,7 +97,7 @@ class RecvThirdPlatDataControllerTest {
         Assertions.assertEquals(200, response.getCode());
 
         ArgumentCaptor<List<PushCustInfoItem>> captor = ArgumentCaptor.forClass(List.class);
-        Mockito.verify(importCustDataService).addCustInfo(captor.capture(), Mockito.eq(0L), Mockito.eq(0L));
+        Mockito.verify(importCustDataService).addApiPushedCustInfo(captor.capture(), Mockito.eq(0L), Mockito.eq(0L));
         List<PushCustInfoItem> items = captor.getValue();
         Assertions.assertEquals(1, items.size());
         PushCustInfoItem item = items.get(0);
@@ -123,7 +123,7 @@ class RecvThirdPlatDataControllerTest {
         RecvThirdPlatCommonResponse<Void> response = controller.applyCredit(request);
         Assertions.assertEquals(400, response.getCode());
         Assertions.assertEquals("该手机号未通过撞库或未先调用access-check", response.getMsg());
-        Mockito.verify(importCustDataService, Mockito.never()).addCustInfo(Mockito.any(), Mockito.anyLong(),
+        Mockito.verify(importCustDataService, Mockito.never()).addApiPushedCustInfo(Mockito.any(), Mockito.anyLong(),
                 Mockito.anyLong());
     }
 

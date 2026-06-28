@@ -4,6 +4,7 @@ import com.github.pagehelper.PageInfo;
 import com.google.common.collect.Sets;
 import com.jhl.silver.union.biz.common.BizConstance;
 import com.jhl.silver.union.biz.common.ResultCode;
+import com.jhl.silver.union.biz.common.enums.CommonStatusEnum;
 import com.jhl.silver.union.biz.common.enums.UserAuthRoleEnum;
 import com.jhl.silver.union.biz.common.utils.BizHelper;
 import com.jhl.silver.union.biz.data.DeptInfo;
@@ -131,6 +132,20 @@ public class UserServiceImpl implements UserService {
         }
 
         return pageInfo;
+    }
+
+    @Override
+    public long countManageableOnlineUsers(Long optUserId) {
+        SuUserInfoDO optUser = this.getValidOperator(optUserId);
+        UserQry userQry = new UserQry()
+                .setDeleteFlag(BizConstance.NOT_DELETED)
+                .setStatus(CommonStatusEnum.OK.status)
+                .setOnlineStatus(CommonConstant.YES);
+        if (!this.isSuper(optUser)) {
+            userQry.setDepartmentId(optUser.getDepartmentId())
+                    .setExcludeSuper(true);
+        }
+        return userInfoManager.count(userQry.toQryWrapper(false));
     }
 
     @Override

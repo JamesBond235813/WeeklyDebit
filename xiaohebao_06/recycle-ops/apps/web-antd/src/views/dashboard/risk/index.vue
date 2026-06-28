@@ -15,11 +15,10 @@ import {
   message,
   Modal,
   Table,
-  Tag,
 } from 'ant-design-vue';
 import dayjs from 'dayjs';
 
-import { getRiskHistory, getRiskReport } from '#/api/biz/risk';
+import { getRiskHistory, getRiskReport, searchCustomers } from '#/api/biz/risk';
 
 const { isDark } = usePreferences();
 
@@ -54,6 +53,64 @@ const historyColumns = [
   { title: '报告查询', key: 'action', width: 130, fixed: 'right' as const },
 ];
 
+const behaviorTimeRows = [
+  {
+    label: '近1个月',
+    keys: [
+      'B22170016',
+      'B22170002',
+      'B22170007',
+      'B22170040',
+      'B22170045',
+      'B22170035',
+    ],
+  },
+  {
+    label: '近3个月',
+    keys: [
+      'B22170017',
+      'B22170003',
+      'B22170008',
+      'B22170041',
+      'B22170046',
+      'B22170036',
+    ],
+  },
+  {
+    label: '近6个月',
+    keys: [
+      'B22170018',
+      'B22170004',
+      'B22170009',
+      'B22170042',
+      'B22170047',
+      'B22170037',
+    ],
+  },
+  {
+    label: '近12个月',
+    keys: [
+      'B22170019',
+      'B22170005',
+      'B22170010',
+      'B22170043',
+      'B22170048',
+      'B22170038',
+    ],
+  },
+  {
+    label: '近24个月',
+    keys: [
+      'B22170020',
+      'B22170006',
+      'B22170011',
+      'B22170044',
+      'B22170049',
+      'B22170039',
+    ],
+  },
+];
+
 const normalizeResponse = (res: any) => res?.data ?? res;
 
 const parsePayload = (value: any) => {
@@ -74,14 +131,10 @@ const formatDateTime = (value: any) => {
     : String(value);
 };
 
-const listText = (items: any) =>
-  Array.isArray(items) && items.length > 0 ? items.join('、') : '--';
 const displayValue = (source: any, key: string, fallback = '--') => {
   const value = source?.[key];
   return value === 0 || value === '0' || value ? value : fallback;
 };
-const money = (value: any) =>
-  value === 0 || value ? `¥${Number(value).toLocaleString('zh-CN')}` : '--';
 
 const normalizedReport = computed(() => currentReport.value || {});
 const payload = computed(() => {
@@ -93,8 +146,8 @@ const payload = computed(() => {
   const legacyData = parsed?.data ?? parsed ?? {};
   return parsed
     ? {
-        report_type: 'XIAOHEBAO_RISK',
-        title: '小荷包风险报告',
+        report_type: 'RONGSHUHUA_RISK',
+        title: '榕树花风控报告',
         query_time:
           normalizedReport.value.queryTime ?? normalizedReport.value.query_time,
         user_profile: {
@@ -112,8 +165,6 @@ const payload = computed(() => {
     : null;
 });
 const profile = computed(() => payload.value?.user_profile || {});
-const systemRisk = computed(() => payload.value?.system_risk || {});
-const latestOrder = computed(() => payload.value?.latest_order || {});
 const panoramaPayload = computed(() => payload.value?.panorama?.payload || {});
 const panoramaData = computed(() => panoramaPayload.value?.data || {});
 const applyDetail = computed(
@@ -130,21 +181,86 @@ const behaviorDetail = computed(
 );
 const probeC = computed(() => payload.value?.probe_c || {});
 const probeData = computed(() => probeC.value?.payload?.data || {});
-const recentAccess = computed(() => payload.value?.recent_access || []);
 
 const normalizeReportRow = (item: any) => ({
   ...item,
   idCard: item?.idCard ?? item?.id_card ?? item?.id_card_no,
   queryTime: item?.queryTime ?? item?.query_time,
   reportJson: item?.reportJson ?? item?.report_json,
+  rowType: item?.rowType ?? 'history',
 });
+
+const normalizeCustomerRow = (item: any) => ({
+  ...item,
+  idCard: item?.idCard ?? item?.id_card ?? item?.id_card_no,
+  phone: item?.phone ?? item?.mobile,
+  rowType: 'customer',
+});
+
+const getIdentityKey = (item: any) => {
+  const idCard = item?.idCard ?? item?.id_card ?? item?.id_card_no ?? '';
+  const phone = item?.phone ?? item?.mobile ?? '';
+  const name = item?.name ?? '';
+  return [String(idCard).trim(), String(phone).trim(), String(name).trim()]
+    .filter(Boolean)
+    .join('|');
+};
+
+const mergeHistoryAndCustomers = (historyItems: any[], customerItems: any[]) => {
+  const rows: any[] = [];
+  const seen = new Set<string>();
+
+  for (const item of historyItems.map((row) => normalizeReportRow(row))) {
+    const key = getIdentityKey(item) || `history-${item.id}`;
+    if (!seen.has(key)) {
+      rows.push(item);
+      seen.add(key);
+    }
+  }
+
+  for (const item of customerItems.map((row) => normalizeCustomerRow(row))) {
+    const key = getIdentityKey(item) || `customer-${item.id}`;
+    if (!seen.has(key)) {
+      rows.push(item);
+      seen.add(key);
+    }
+  }
+
+  return rows;
+};
+
+const getRowKey = (record: any) =>
+  `${record.rowType || 'history'}-${record.id || getIdentityKey(record)}`;
 
 const loadHistory = async (page = pagination.value.current || 1) => {
   tableLoading.value = true;
   try {
+    const keyword = historyForm.keyword?.trim();
+    if (keyword) {
+      const [historyRes, customerRes] = await Promise.all([
+        getRiskHistory({
+          keyword,
+          page: 1,
+          pageSize: 100,
+        }),
+        searchCustomers(keyword),
+      ]);
+      const historyData = normalizeResponse(historyRes);
+      const customerData = normalizeResponse(customerRes);
+      historyRows.value = mergeHistoryAndCustomers(
+        historyData?.records || [],
+        Array.isArray(customerData) ? customerData : [],
+      );
+      pagination.value = {
+        ...pagination.value,
+        current: 1,
+        total: historyRows.value.length,
+      };
+      return;
+    }
+
     const res = normalizeResponse(
       await getRiskHistory({
-        keyword: historyForm.keyword,
         page,
         pageSize: pagination.value.pageSize || 20,
       }),
@@ -169,12 +285,34 @@ const handleTableChange = (pag: TablePaginationConfig) => {
     current: pag.current,
     pageSize: pag.pageSize,
   };
+  if (historyForm.keyword?.trim()) {
+    return;
+  }
   loadHistory(pag.current || 1);
 };
 
 const openReport = (report: any) => {
   currentReport.value = normalizeReportRow(report);
   reportVisible.value = true;
+};
+
+const queryReportFromRow = async (record: any) => {
+  reportLoading.value = true;
+  try {
+    const res = normalizeResponse(
+      await getRiskReport({
+        name: record.name?.trim(),
+        idCard: record.idCard?.trim(),
+        phone: record.phone?.trim(),
+      }),
+    );
+    openReport(res);
+    await loadHistory(1);
+  } catch (error: any) {
+    message.error(error?.message || '获取风控报告失败');
+  } finally {
+    reportLoading.value = false;
+  }
 };
 
 const submitSingleQuery = async () => {
@@ -192,6 +330,7 @@ const submitSingleQuery = async () => {
       }),
     );
     openReport(res);
+    historyForm.keyword = '';
     await loadHistory(1);
   } catch (error: any) {
     message.error(error?.message || '获取风控报告失败');
@@ -286,7 +425,7 @@ onMounted(() => {
           :data-source="historyRows"
           :loading="tableLoading"
           :pagination="pagination"
-          row-key="id"
+          :row-key="getRowKey"
           size="middle"
           @change="handleTableChange"
         >
@@ -295,7 +434,13 @@ onMounted(() => {
               {{ formatDateTime(record.queryTime) }}
             </template>
             <template v-if="column.key === 'action'">
-              <Button type="link" @click="openReport(record)">查看报告</Button>
+              <Button
+                type="link"
+                :loading="reportLoading"
+                @click="queryReportFromRow(record)"
+              >
+                查询
+              </Button>
             </template>
           </template>
         </Table>
@@ -303,7 +448,7 @@ onMounted(() => {
 
       <Modal
         v-model:open="reportVisible"
-        title="小荷包风险报告"
+        title="榕树花风控报告"
         width="1120px"
         :footer="null"
         style="top: 2vh"
@@ -313,144 +458,86 @@ onMounted(() => {
           class="composite-risk-shell"
           :class="[{ 'risk-report-dark': isDark }]"
         >
-          <section class="composite-hero">
-            <div>
-              <span class="composite-eyebrow">Xiaohebao Risk</span>
-              <h3>小荷包风险报告</h3>
-              <p>
-                合并全景雷达与探针C数据，展示客户申请行为、履约付款行为及外部履约探查结果。
-              </p>
+          <section class="risk-hero">
+            <div class="risk-hero-top">
+              <div class="risk-hero-main">
+                <span class="risk-eyebrow">RONGSHUHUA RISK</span>
+                <h3>榕树花风控报告</h3>
+                <p>
+                  合并全景雷达与探针C数据，展示客户申请行为、履约付款行为及外部履约探查结果。
+                </p>
+              </div>
+              <div class="risk-hero-side">
+                <div class="hero-metric">
+                  <span>申请准入分</span>
+                  <strong>{{ displayValue(applyDetail, 'A22160001') }}</strong>
+                </div>
+                <div class="hero-metric">
+                  <span>信用行为分</span>
+                  <strong>{{ displayValue(behaviorDetail, 'B22170001') }}</strong>
+                </div>
+              </div>
             </div>
-            <div class="hero-source">
-              <span>系统数据</span>
-              <span>全景雷达</span>
-              <span>探针C</span>
+            <div class="hero-profile-grid">
+              <div class="hero-profile-item">
+                <label>客户姓名</label>
+                <span>{{ profile.name || normalizedReport.name || '--' }}</span>
+              </div>
+              <div class="hero-profile-item">
+                <label>身份证号</label>
+                <span>{{
+                  profile.id_card || normalizedReport.idCard || '--'
+                }}</span>
+              </div>
+              <div class="hero-profile-item">
+                <label>手机号</label>
+                <span>{{ profile.phone || normalizedReport.phone || '--' }}</span>
+              </div>
+              <div class="hero-profile-item">
+                <label>报告时间</label>
+                <span>{{
+                  formatDateTime(normalizedReport.queryTime || payload.query_time)
+                }}</span>
+              </div>
             </div>
-          </section>
-
-          <section class="summary-grid">
-            <div class="summary-item">
-              <label>姓名</label>
-              <span>{{ profile.name || normalizedReport.name || '--' }}</span>
-            </div>
-            <div class="summary-item">
-              <label>手机号</label>
-              <span>{{ profile.phone || normalizedReport.phone || '--' }}</span>
-            </div>
-            <div class="summary-item">
-              <label>身份证号</label>
-              <span>{{
-                profile.id_card || normalizedReport.idCard || '--'
-              }}</span>
-            </div>
-            <div class="summary-item">
-              <label>报告时间</label>
-              <span>{{
-                formatDateTime(normalizedReport.queryTime || payload.query_time)
-              }}</span>
-            </div>
-          </section>
-
-          <section class="report-section">
-            <div class="section-head">
-              <h4>系统风险核查</h4>
-              <p>来自本系统黑名单、位置风控、登录拦截与手机号绑定记录。</p>
-            </div>
-            <div class="risk-tags">
-              <Tag :color="systemRisk.blacklist_hit ? 'error' : 'success'">
-                黑名单：{{ systemRisk.blacklist_hit ? '命中' : '未命中' }}
-              </Tag>
-              <Tag
-                :color="systemRisk.location_risk_hit ? 'warning' : 'success'"
-              >
-                风险地址：{{ systemRisk.location_risk_hit ? '命中' : '未命中' }}
-              </Tag>
-              <Tag
-                :color="systemRisk.login_location_blocked ? 'error' : 'success'"
-              >
-                登录位置拦截：{{
-                  systemRisk.login_location_blocked ? '触发' : '未触发'
-                }}
-              </Tag>
-              <Tag color="processing">
-                同手机号绑定：{{ systemRisk.same_phone_binding_count || 0 }}
-                条
-              </Tag>
-            </div>
-            <table class="report-table">
-              <tbody>
-                <tr>
-                  <th>黑名单原因</th>
-                  <td>{{ systemRisk.blacklist_reason || '--' }}</td>
-                  <th>风险地址明细</th>
-                  <td>{{ systemRisk.location_risk_detail || '--' }}</td>
-                </tr>
-                <tr>
-                  <th>登录拦截原因</th>
-                  <td>{{ systemRisk.login_location_reason || '--' }}</td>
-                  <th>风险关键词</th>
-                  <td>{{ listText(systemRisk.location_risk_keywords) }}</td>
-                </tr>
-              </tbody>
-            </table>
           </section>
 
           <section class="report-section">
             <div class="section-head">
-              <h4>当前订单摘要</h4>
-              <p>展示客户最近一笔订单的当前状态。</p>
-            </div>
-            <table class="report-table">
-              <tbody>
-                <tr>
-                  <th>订单状态</th>
-                  <td>{{ latestOrder?.status || '--' }}</td>
-                  <th>授信额度</th>
-                  <td>{{ money(latestOrder?.credit_limit) }}</td>
-                  <th>可用额度</th>
-                  <td>{{ money(latestOrder?.available_credit_limit) }}</td>
-                </tr>
-                <tr>
-                  <th>商品名称</th>
-                  <td>{{ latestOrder?.product_name || '--' }}</td>
-                  <th>应付金额</th>
-                  <td>
-                    {{
-                      money(
-                        latestOrder?.payment_amount ||
-                          latestOrder?.product_total_price,
-                      )
-                    }}
-                  </td>
-                  <th>到期日</th>
-                  <td>{{ formatDateTime(latestOrder?.due_date) }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </section>
-
-          <section class="report-section">
-            <div class="section-head">
-              <h4>全景雷达摘要</h4>
-              <p>保留原始全景雷达报告，本报告提取关键字段展示。</p>
+              <div>
+                <h4>申请行为详情</h4>
+                <p>
+                  申请准入置信度：{{
+                    displayValue(applyDetail, 'A22160002')
+                  }}
+                </p>
+              </div>
             </div>
             <table class="report-table">
               <tbody>
                 <tr>
                   <th>申请准入分</th>
                   <td>{{ displayValue(applyDetail, 'A22160001') }}</td>
-                  <th>信用行为分</th>
-                  <td>{{ displayValue(behaviorDetail, 'B22170001') }}</td>
-                  <th>最近一次查询时间</th>
-                  <td>{{ displayValue(applyDetail, 'A22160007') }}</td>
+                  <th>近1个月机构总查询笔数</th>
+                  <td>{{ displayValue(applyDetail, 'A22160008') }}</td>
+                  <th>申请命中机构数</th>
+                  <td>{{ displayValue(applyDetail, 'A22160003') }}</td>
                 </tr>
                 <tr>
                   <th>机构总查询次数</th>
                   <td>{{ displayValue(applyDetail, 'A22160006') }}</td>
-                  <th>近12个月M0+逾期订单笔数</th>
-                  <td>{{ displayValue(behaviorDetail, 'B22170026') }}</td>
-                  <th>近12个月累计逾期金额</th>
-                  <td>{{ displayValue(behaviorDetail, 'B22170032') }}</td>
+                  <th>近3个月机构总查询笔数</th>
+                  <td>{{ displayValue(applyDetail, 'A22160009') }}</td>
+                  <th>申请命中消金类机构数</th>
+                  <td>{{ displayValue(applyDetail, 'A22160004') }}</td>
+                </tr>
+                <tr>
+                  <th>最近一次查询时间</th>
+                  <td>{{ displayValue(applyDetail, 'A22160007') }}</td>
+                  <th>近6个月机构总查询笔数</th>
+                  <td>{{ displayValue(applyDetail, 'A22160010') }}</td>
+                  <th>申请命中网络信用服务类机构数</th>
+                  <td>{{ displayValue(applyDetail, 'A22160005') }}</td>
                 </tr>
               </tbody>
             </table>
@@ -458,13 +545,159 @@ onMounted(() => {
 
           <section class="report-section">
             <div class="section-head">
-              <h4>探针C摘要</h4>
-              <p>展示探针C返回的履约与逾期概况。</p>
+              <div>
+                <h4>履约付款详情</h4>
+                <p>
+                  信用行为置信度：{{
+                    displayValue(behaviorDetail, 'B22170051')
+                  }}
+                </p>
+              </div>
+            </div>
+
+            <table class="report-table">
+              <tbody>
+                <tr>
+                  <th>信用行为分</th>
+                  <td>{{ displayValue(behaviorDetail, 'B22170001') }}</td>
+                  <th>最近一次服务发放时间</th>
+                  <td>{{ displayValue(behaviorDetail, 'B22170054') }}</td>
+                  <th>已结清订单数</th>
+                  <td>{{ displayValue(behaviorDetail, 'B22170052') }}</td>
+                </tr>
+                <tr>
+                  <th>信用服务时长</th>
+                  <td>{{ displayValue(behaviorDetail, 'B22170053') }}</td>
+                  <th>最近一次履约距今天数</th>
+                  <td>{{ displayValue(behaviorDetail, 'B22170050') }}</td>
+                  <th>正常付款订单占总订单数比例</th>
+                  <td class="emphasis danger">
+                    {{ displayValue(behaviorDetail, 'B22170034') }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+
+            <table class="report-table">
+              <thead>
+                <tr>
+                  <th>行为时间</th>
+                  <th>机构数</th>
+                  <th>订单笔数</th>
+                  <th>订单总金额</th>
+                  <th>履约订单总金额</th>
+                  <th>履约订单数</th>
+                  <th>失败扣款数</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in behaviorTimeRows" :key="row.label">
+                  <th>{{ row.label }}</th>
+                  <td>{{ displayValue(behaviorDetail, row.keys[0]) }}</td>
+                  <td>{{ displayValue(behaviorDetail, row.keys[1]) }}</td>
+                  <td>{{ displayValue(behaviorDetail, row.keys[2]) }}</td>
+                  <td class="emphasis success">
+                    {{ displayValue(behaviorDetail, row.keys[3]) }}
+                  </td>
+                  <td class="emphasis success">
+                    {{ displayValue(behaviorDetail, row.keys[4]) }}
+                  </td>
+                  <td class="emphasis danger">
+                    {{ displayValue(behaviorDetail, row.keys[5]) }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+
+            <div class="grid-block">
+              <table class="report-table">
+                <thead>
+                  <tr>
+                    <th>近12个月订单金额</th>
+                    <th>1K及以下</th>
+                    <th>1K-3K</th>
+                    <th>3K-10K</th>
+                    <th>1W以上</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <th>订单笔数</th>
+                    <td>{{ displayValue(behaviorDetail, 'B22170012', '0') }}</td>
+                    <td>{{ displayValue(behaviorDetail, 'B22170013', '0') }}</td>
+                    <td>{{ displayValue(behaviorDetail, 'B22170014', '0') }}</td>
+                    <td>{{ displayValue(behaviorDetail, 'B22170015', '0') }}</td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <table class="report-table">
+                <thead>
+                  <tr>
+                    <th>近12个月消费信用类机构数</th>
+                    <th>近24个月消费信用类机构数</th>
+                    <th>近12个月线上信用类机构数</th>
+                    <th>近24个月线上信用类机构数</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>{{ displayValue(behaviorDetail, 'B22170021', '0') }}</td>
+                    <td>{{ displayValue(behaviorDetail, 'B22170022', '0') }}</td>
+                    <td>{{ displayValue(behaviorDetail, 'B22170023', '0') }}</td>
+                    <td>{{ displayValue(behaviorDetail, 'B22170024', '0') }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <table class="report-table">
+              <tbody>
+                <tr>
+                  <th>近6个月M0+逾期订单笔数</th>
+                  <td>{{ displayValue(behaviorDetail, 'B22170025') }}</td>
+                  <th>近6个月M1+逾期订单笔数</th>
+                  <td>{{ displayValue(behaviorDetail, 'B22170028') }}</td>
+                  <th>近6个月累计逾期金额</th>
+                  <td>{{ displayValue(behaviorDetail, 'B22170031') }}</td>
+                </tr>
+                <tr>
+                  <th>近12个月M0+逾期订单笔数</th>
+                  <td class="emphasis danger">
+                    {{ displayValue(behaviorDetail, 'B22170026') }}
+                  </td>
+                  <th>近12个月M1+逾期订单笔数</th>
+                  <td class="emphasis danger">
+                    {{ displayValue(behaviorDetail, 'B22170029') }}
+                  </td>
+                  <th>近12个月累计逾期金额</th>
+                  <td class="emphasis danger">
+                    {{ displayValue(behaviorDetail, 'B22170032') }}
+                  </td>
+                </tr>
+                <tr>
+                  <th>近24个月M0+逾期订单笔数</th>
+                  <td>{{ displayValue(behaviorDetail, 'B22170027') }}</td>
+                  <th>近24个月M1+逾期订单笔数</th>
+                  <td>{{ displayValue(behaviorDetail, 'B22170030') }}</td>
+                  <th>近24个月累计逾期金额</th>
+                  <td>{{ displayValue(behaviorDetail, 'B22170033') }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section class="report-section">
+            <div class="section-head">
+              <div>
+                <h4>探针C信息</h4>
+                <p>展示探针C返回的履约与逾期概况。</p>
+              </div>
             </div>
             <table class="report-table">
               <tbody>
                 <tr>
-                  <th>结果</th>
+                  <th>探查结果</th>
                   <td>{{ probeC.result_label || '--' }}</td>
                   <th>最大逾期金额</th>
                   <td>{{ probeData.max_overdue_amt || '--' }}</td>
@@ -498,56 +731,8 @@ onMounted(() => {
               </tbody>
             </table>
           </section>
-
-          <section class="report-section">
-            <div class="section-head">
-              <h4>最近访问记录</h4>
-              <p>按时间由近到远展示最近访问、IP和经纬度解析结果。</p>
-            </div>
-            <Table
-              :columns="[
-                {
-                  title: '时间',
-                  dataIndex: 'created_at',
-                  key: 'created_at',
-                  width: 160,
-                },
-                { title: '操作', dataIndex: 'title', key: 'title', width: 160 },
-                { title: 'IP', dataIndex: 'ip', key: 'ip', width: 130 },
-                {
-                  title: 'IP地址',
-                  dataIndex: 'ip_address',
-                  key: 'ip_address',
-                  width: 180,
-                },
-                {
-                  title: '经纬度',
-                  dataIndex: 'lon_lat',
-                  key: 'lon_lat',
-                  width: 150,
-                },
-                {
-                  title: '经纬度地址',
-                  dataIndex: 'lon_lat_address',
-                  key: 'lon_lat_address',
-                  width: 200,
-                },
-              ]"
-              :data-source="recentAccess"
-              :pagination="false"
-              row-key="id"
-              size="small"
-              bordered
-            >
-              <template #bodyCell="{ column, record }">
-                <template v-if="column.key === 'created_at'">
-                  {{ formatDateTime(record.created_at) }}
-                </template>
-              </template>
-            </Table>
-          </section>
         </div>
-        <Empty v-else description="暂无小荷包风险报告数据" />
+        <Empty v-else description="暂无榕树花风控报告数据" />
       </Modal>
     </div>
   </Page>
@@ -586,10 +771,8 @@ onMounted(() => {
   padding-right: 4px;
 }
 
-.composite-hero {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+.risk-hero {
+  display: grid;
   gap: 18px;
   padding: 20px 22px;
   border-radius: 8px;
@@ -597,66 +780,89 @@ onMounted(() => {
   background: linear-gradient(135deg, #163b76 0%, #2871b8 54%, #45a28d 100%);
 }
 
-.composite-eyebrow {
+.risk-hero-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.risk-hero-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.risk-eyebrow {
   display: inline-flex;
   padding: 5px 10px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.16);
   font-size: 12px;
+  text-transform: uppercase;
 }
 
-.composite-hero h3 {
+.risk-hero-main h3 {
   margin: 14px 0 8px;
   font-size: 26px;
   line-height: 1.15;
 }
 
-.composite-hero p {
+.risk-hero-main p {
   margin: 0;
   color: rgba(255, 255, 255, 0.86);
   line-height: 1.6;
 }
 
-.hero-source {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px;
-  min-width: 220px;
+.risk-hero-side {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(120px, 1fr));
+  gap: 12px;
+  min-width: 280px;
 }
 
-.hero-source span {
-  padding: 8px 10px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.14);
+.hero-metric {
+  padding: 16px;
   border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.hero-metric span {
+  display: block;
+  color: rgba(255, 255, 255, 0.74);
   font-size: 12px;
 }
 
-.summary-grid {
+.hero-metric strong {
+  display: block;
+  margin-top: 10px;
+  font-size: 28px;
+  line-height: 1;
+}
+
+.hero-profile-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
-  margin-top: 16px;
 }
 
-.summary-item {
-  padding: 14px 16px;
+.hero-profile-item {
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 8px;
-  background: #f7faff;
-  border: 1px solid #e6edf8;
+  background: rgba(255, 255, 255, 0.14);
 }
 
-.summary-item label {
+.hero-profile-item label {
   display: block;
   margin-bottom: 7px;
+  color: rgba(255, 255, 255, 0.72);
   font-size: 12px;
-  color: #73849b;
 }
 
-.summary-item span {
+.hero-profile-item span {
   display: block;
-  color: #25384f;
+  color: #ffffff;
   font-weight: 600;
   word-break: break-all;
 }
@@ -685,15 +891,9 @@ onMounted(() => {
   font-size: 13px;
 }
 
-.risk-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
 .report-table {
   width: 100%;
+  margin-top: 14px;
   border-collapse: collapse;
   table-layout: fixed;
 }
@@ -717,20 +917,34 @@ onMounted(() => {
   color: #2d4059;
 }
 
-.risk-report-dark .summary-item,
+.grid-block {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.emphasis.success {
+  color: #14905f;
+  font-weight: 700;
+}
+
+.emphasis.danger {
+  color: #d84b47;
+  font-weight: 700;
+}
+
 .risk-report-dark .report-section,
 .risk-report-dark .report-table {
   background: #0b1220;
   border-color: #1f2a44;
 }
 
-.risk-report-dark .summary-item label,
 .risk-report-dark .section-head p,
 .risk-report-dark .report-table th {
   color: #94a3b8;
 }
 
-.risk-report-dark .summary-item span,
 .risk-report-dark .section-head h4,
 .risk-report-dark .report-table td {
   color: #e2e8f0;
@@ -738,5 +952,26 @@ onMounted(() => {
 
 .risk-report-dark .report-table th {
   background: #0f172a;
+}
+
+@media (max-width: 1200px) {
+  .risk-hero-top {
+    flex-direction: column;
+  }
+
+  .risk-hero-side {
+    min-width: 0;
+  }
+
+  .hero-profile-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .hero-profile-grid,
+  .risk-hero-side {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

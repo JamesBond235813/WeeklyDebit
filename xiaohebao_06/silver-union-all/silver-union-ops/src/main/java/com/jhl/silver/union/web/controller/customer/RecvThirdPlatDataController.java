@@ -164,7 +164,7 @@ public class RecvThirdPlatDataController {
                     .setMobile(bizReq.getMobile())
                     .setIdCardNo(bizReq.getIdNo())
                     .setChannelName(config.getChannelName());
-            importCustDataService.addCustInfo(List.of(item), 0L, 0L);
+            importCustDataService.addApiPushedCustInfo(List.of(item), 0L, 0L);
             response = buildSuccessResponse(null);
 
             return response;

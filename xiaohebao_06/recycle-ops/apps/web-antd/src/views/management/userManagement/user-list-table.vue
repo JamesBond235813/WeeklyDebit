@@ -5,7 +5,7 @@ import type { PagedInfo } from '#/api/biz/biz-common';
 import type { DeptInfo } from '#/api/biz/dept';
 import type { UserInfoRowItem } from '#/api/biz/user';
 
-import { onMounted } from 'vue';
+import { onBeforeUnmount, onMounted } from 'vue';
 
 import { useVbenModal } from '@vben/common-ui';
 
@@ -27,6 +27,7 @@ const [ResetPswdModal, resetPswdModalApi] = useVbenModal({
   // 连接抽离的组件
   connectedComponent: ResetPasswordModal,
 });
+let onlineRefreshTimer: number | undefined;
 
 const formOptions: VbenFormProps = {
   collapsed: false,
@@ -84,7 +85,7 @@ const gridOptions: VxeGridProps<UserInfoRowItem> = {
   },
   columns: [
     { field: 'seq', title: '#', type: 'seq', width: 50 },
-    { field: 'userName', title: '用户名', width: 100 },
+    { field: 'userName', title: '用户名', width: 100, slots: { default: 'userName' } },
     { field: 'realName', title: '姓名', width: 120 },
     { field: 'phone', title: '手机号', width: 130 },
     { field: 'departmentName', title: '部门', width: 150 },
@@ -221,6 +222,16 @@ const renderEmptySlot = () => {
 };
 onMounted(() => {
   initDeptInfo();
+  onlineRefreshTimer = window.setInterval(() => {
+    gridApi.query();
+  }, 10_000);
+});
+
+onBeforeUnmount(() => {
+  if (onlineRefreshTimer) {
+    window.clearInterval(onlineRefreshTimer);
+    onlineRefreshTimer = undefined;
+  }
 });
 </script>
 <template>
@@ -256,6 +267,15 @@ onMounted(() => {
           </Button>
         </div>
       </template>
+      <template #userName="{ row }">
+        <span class="user-name-cell">
+          <span>{{ row.userName }}</span>
+          <span
+            :class="row.onlineStatus === 1 ? 'online-dot' : 'offline-dot'"
+            :title="row.onlineStatus === 1 ? '在线' : '离线'"
+          ></span>
+        </span>
+      </template>
       <template #empty>
         {{ renderEmptySlot() }}
       </template>
@@ -263,3 +283,30 @@ onMounted(() => {
   </div>
   <ResetPswdModal />
 </template>
+
+<style scoped>
+.user-name-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.online-dot,
+.offline-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+
+.online-dot {
+  background: #22c55e;
+  box-shadow: 0 0 0 2px rgb(34 197 94 / 12%);
+}
+
+.offline-dot {
+  background: #9ca3af;
+}
+</style>
